@@ -1,0 +1,11 @@
+@include <path>
+
+@define <macroname> [<value>]
+@undef
+
+@ifdef <macroname>
+@ifndef <macroname>
+@if <macroname> eq|ne [<value>]
+@elif <macroname> eq|ne [<value>]
+@else
+@endif
