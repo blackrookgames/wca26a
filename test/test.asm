@@ -1,7 +1,7 @@
 @include "./common.asm"
 
-; !entry LAB_f000
-; !break LAB_f000
+!ENTRY LAB_f000
+!BREAK LAB_f000
 
 ; Zero page
 @define DAT_0000 $00
@@ -63,6 +63,9 @@ LAB_f03d:
 LAB_f04c:
     STA DAT_0002
     INX 
-    CPX #$1e
+    CPX #0x1e
     BNE LAB_f04c
     JMP LAB_f013
+
+; Remove this
+TEST {FDDSD (sdfsd MOD sdf + sfd) LSHFT sdfsdfdsf} ((()sdfsd))

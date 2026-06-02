@@ -69,7 +69,8 @@ class FileUtil:
         return lines
     
     @classmethod
-    def write_all_lines(cls, path:str|_Path, lines:list[_SrcChunk]):
+    def write_all_lines(cls, path:str|_Path,\
+            lines:list[str]|list[_SrcChunk]|list[list[_SrcChunk]]|list[str|_SrcChunk|list[_SrcChunk]]):
         """
         Writes a list of lines to a file
 
@@ -78,8 +79,18 @@ class FileUtil:
         :raise CLICommandError: An error occurred
         """
         data = bytearray()
+        def write(line:str):
+            nonlocal data
+            for _char in line: data.append(ord(_char))
         for _line in lines:
-            for _char in _line.content: data.append(ord(_char))
+            if isinstance(_line, str):
+                write(_line)
+            elif isinstance(_line, _SrcChunk):
+                write(_line.content)
+            else:
+                for _chnk in _line:
+                    write(_chnk.content)
+                    data.append(0x20)
             data.append(0x0A)
         _cliutil.FileUtil.write_all_bytes(path, data)
         

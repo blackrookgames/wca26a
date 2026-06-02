@@ -1,0 +1,49 @@
+first chunk:
+if ends with ':'
+    it's a label declaration (ex: 'mainlogic:')
+elif starts with '!'
+    it's an assembler command (ex: '!entry')
+elif a word
+    it's an assembly instruction (ex: 'lda')
+else
+    invalid
+
+following chunk:
+if inquotes:
+    it's a string
+elif starts with '.'
+    it's a label reference
+elif starts with '$'
+    it's a 6502-style hex number
+elif starts with '%'
+    it's a 6502-style bin number
+elif starts with digit
+    if 2nd character is 'x'
+        it's a C-style hex number
+    elif 2nd character is 'b'
+        it's a C-style hex number
+    else
+        it's a decimal number
+elif a word
+    if 'a', 'x', or 'y'
+        it's a register reference
+    elif 'mod', 'b8', or 'b16'
+        it's an operator
+    else
+        it's a label reference
+elif open parenthesis
+    it's an opening parenthesis
+elif close parenthesis
+    it's a closing parenthesis
+elif '#'
+    it's an immediate indicator
+elif ','
+    it's a delimiter
+elif an operator character
+    it's an operator
+else
+    invalid
+
+size (8 or 16) for number values:
+hex & bin    determined by number of digits
+dec          determined by size needed to represent value

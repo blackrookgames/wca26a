@@ -1,17 +1,52 @@
+;      comment
+
 @predir          Preprocessor directive
+macro            Macro
+
+eq               Equal to
+ne               Not equal to
 
 lv0label:        Level 0 label declaration
 .lv1label:       Level 1 label declaration
 ..lv2label:      Level 2 label declaration
 
-!assdir          Assembler directive/command
+!assdir          Assembler command
 lda              6502 instruction name
 
-macro            Macro
+"string"         Text string
+
+123                   decimal number
+$12                   8-bit hex number (6502-style)
+$1234                 16-bit hex number (6502-style)
+%01010101             8-bit bin number (6502-style)
+%0101010101010101     16-bit bin number (6502-style)
+0x12                  8-bit hex number (C-style)
+0x1234                16-bit hex number (C-style)
+0b01010101            8-bit bin number (C-style)
+0b0101010101010101    16-bit bin number (C-style)
+
 lv0label         Level 0 label reference
 .lv1label        Level 1 label reference
 ..lv2label       Level 2 label reference
-"string"         Text string
+
+mod      modulo
+lshft    left bit-shift
+rshft    right bit-shift
+b8       Force 8-bit
+b16      Force 16-bit
+
+a    accumulator
+x    X-index
+y    Y-index
+
+(      Open parenthesis
+)      Close parenthesis
+{      Open alt parenthesis
+}      Close alt parenthesis
+
+#      immediate
+
+,      comma
 
 +      plus
 -      minus
@@ -23,31 +58,3 @@ lv0label         Level 0 label reference
 ~      bitwise NOT
 <      Low byte
 >      High byte
-(      Open parenthesis
-)      Close parenthesis
-
-#      immediate
-,      comma
-
-;      comment
-
-mod    modulo
-b8     Force 8-bit
-b16    Force 16-bit
-
-eq     Equal to
-ne     Not equal to
-
-a    accumulator
-x    X-index
-y    Y-index
-
-123                   decimal number
-$12                   8-bit hex number (6502-style)
-$1234                 16-bit hex number (6502-style)
-%01010101             8-bit bin number (6502-style)
-%0101010101010101     16-bit bin number (6502-style)
-0x12                  8-bit hex number (C-style)
-0x1234                16-bit hex number (C-style)
-0b01010101            8-bit bin number (C-style)
-0b0101010101010101    16-bit bin number (C-style)

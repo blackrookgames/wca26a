@@ -40,3 +40,38 @@ class SrcChunk:
         return self.__content
 
     #endregion
+
+    #region operators
+
+    def __repr__(self):
+        return f"{SrcChunk.__name__}({self.__path}, {self.__linenumber}, {self.__content})"
+    
+    def __str__(self):
+        return f"{self.__path} {self.__linenumber} {self.__content}"
+
+    #endregion
+
+    #region methods
+
+    def sub(self, beg:None|int = None, end:None|int = None):
+        """
+        Creates a subchunk
+
+        :param beg: Beginning index
+        :param end: Ending index
+        :return: Created subchunk
+        :raises IndexError:
+            beg is less than 0\n
+            or\n
+            end is greater than len(content)\n
+            or\n
+            beg is greater than end
+        """
+        if beg is None: beg = 0
+        elif beg < 0: raise IndexError("beg must be greater than or equal to 0.")
+        if end is None: end = len(self.__content)
+        elif end > len(self.__content): raise IndexError("end less than or equal to len(content).")
+        if beg > end: raise IndexError("beg must be less than or equal to end.")
+        return SrcChunk(self.path, self.linenumber, self.content[beg:end])
+
+    #endregion
