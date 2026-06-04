@@ -6,7 +6,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
 from io import StringIO
-from typing import cast
+from typing import cast, Callable
 from pathlib import Path
 
 import assutil
@@ -83,6 +83,10 @@ class cmd_ass(cli.CLICommand):
         def __init__(self, src:assutil.SrcChunk):
             self.__src = src
 
+        @classmethod
+        def create(cls, *args, **kwargs) -> 'cmd_ass._Token':
+            raise NotImplementedError("create has not been implemented.")
+
         #endregion
 
         #region properties
@@ -125,20 +129,26 @@ class cmd_ass(cli.CLICommand):
 
         #region init
 
-        def __init__(self, src:assutil.SrcChunk, sensitive:bool):
+        def __init__(self, src:assutil.SrcChunk,\
+                labels:dict[str, 'cmd_ass._TokenLabelDec'], scope:list[str], sensitive:bool):
+            """ NOTE: label and scope may be modified """
             super().__init__(src)
             # Make sure it ends with a colon
             if not src.content.endswith(':'):
                 raise cmd_ass._error(src, "Label declaration must end with a colon.")
-            # Extract level
-            self.__level = 0
-            while src.content[self.__level] == '.':
-                self.__level += 1
-            if (self.__level + 1) == len(src.content):
-                raise cmd_ass._error(src, "Label name cannot be empty.")
-            # Extract name
-            self.__name = cmd_ass._get_word(src.sub(self.__level, len(src.content) - 1))
-            if not sensitive: self.__name = self.__name.upper()
+            # Extract level and name
+            self.__level, self.__name, self.__path = cmd_ass._TokenLabelRef.extract_labelinfo(
+                src.sub(end = len(src.content) - 1), scope, sensitive)
+            if self.__path in labels:
+                raise cmd_ass._error(src, f"{self.__path} has already been defined.")
+            # Update labels and scopes (must be done AFTER ensuring label is valid)
+            labels[self.__path] = self
+            while len(scope) > self.__level: scope.pop()
+            scope.append(self.__name)
+
+        @classmethod
+        def create(cls, *args, **kwargs) -> 'cmd_ass._Token':
+            return cls(*args, **kwargs)
 
         #endregion
 
@@ -156,6 +166,9 @@ class cmd_ass(cli.CLICommand):
         @property
         def name(self): return self.__name
 
+        @property
+        def path(self): return self.__path
+
         #endregion
 
     class _TokenCommand(_Token):
@@ -170,6 +183,10 @@ class cmd_ass(cli.CLICommand):
             # Extract name
             self.__name = cmd_ass._get_word(src.sub(1))
 
+        @classmethod
+        def create(cls, *args, **kwargs) -> 'cmd_ass._Token':
+            return cls(*args, **kwargs)
+        
         #endregion
 
         #region operators
@@ -193,6 +210,10 @@ class cmd_ass(cli.CLICommand):
             super().__init__(src)
             self.__name = cmd_ass._get_word(src).upper()
 
+        @classmethod
+        def create(cls, *args, **kwargs) -> 'cmd_ass._Token':
+            return cls(*args, **kwargs)
+        
         #endregion
 
         #region operators
@@ -237,18 +258,14 @@ class cmd_ass(cli.CLICommand):
 
         #region init
 
-        def __init__(self, src:assutil.SrcChunk, sensitive:bool):
+        def __init__(self, src:assutil.SrcChunk, scope:Sequence[str], sensitive:bool):
             super().__init__(src)
-            # Extract level
-            self.__level = 0
-            while src.content[self.__level] == '.':
-                self.__level += 1
-            if (self.__level + 1) == len(src.content):
-                raise cmd_ass._error(src, "Label name cannot be empty.")
-            # Extract name
-            self.__name = cmd_ass._get_word(src.sub(self.__level))
-            if not sensitive: self.__name = self.__name.upper()
+            self.__level, self.__name, self.__path = self.extract_labelinfo(src, scope, sensitive)
 
+        @classmethod
+        def create(cls, *args, **kwargs) -> 'cmd_ass._Token':
+            return cls(*args, **kwargs)
+        
         #endregion
 
         #region operators
@@ -265,6 +282,34 @@ class cmd_ass(cli.CLICommand):
         @property
         def name(self): return self.__name
 
+        @property
+        def path(self): return self.__path
+
+        #endregion
+        
+        #region methods
+
+        @classmethod
+        def extract_labelinfo(cls, src:assutil.SrcChunk, scope:Sequence[str], sensitive:bool):
+            # Extract level
+            level = 0
+            while src.content[level] == '.':
+                level += 1
+            if (level + 1) == len(src.content):
+                raise cmd_ass._error(src, "Label name cannot be empty.")
+            if level > len(scope):
+                raise cmd_ass._error(src, "Invalid scope level")
+            # Extract name
+            name = cmd_ass._get_word(src.sub(level))
+            if not sensitive: name = name.upper()
+            # Extract path
+            with StringIO() as _path:
+                for _i in range(level): _path.write(f"{scope[_i]}.")
+                _path.write(name)
+                path = _path.getvalue()
+            # Success!!!
+            return level, name, path
+
         #endregion
 
     class _TokenNumber(_Token):
@@ -275,6 +320,10 @@ class cmd_ass(cli.CLICommand):
             super().__init__(src)
             self.__value, self.__is16 = self.__parse(src)
 
+        @classmethod
+        def create(cls, *args, **kwargs) -> 'cmd_ass._Token':
+            return cls(*args, **kwargs)
+        
         #endregion
 
         #region operators
@@ -337,6 +386,10 @@ class cmd_ass(cli.CLICommand):
             if not (self.__reg in self.__REGS):
                 raise cmd_ass._error(src, f"{self.__reg} is not a valid register.")
 
+        @classmethod
+        def create(cls, *args, **kwargs) -> 'cmd_ass._Token':
+            return cls(*args, **kwargs)
+        
         #endregion
 
         #region const
@@ -376,6 +429,10 @@ class cmd_ass(cli.CLICommand):
             if not (self.__type in self.__TYPES):
                 raise cmd_ass._error(src, f"{self.__type} is not a valid operator type.")
 
+        @classmethod
+        def create(cls, *args, **kwargs) -> 'cmd_ass._Token':
+            return cls(*args, **kwargs)
+        
         #endregion
 
         #region const
@@ -407,7 +464,7 @@ class cmd_ass(cli.CLICommand):
 
         #endregion
 
-    class _Token_ParOpen(_Token):
+    class _TokenParOpen(_Token):
 
         #region init
 
@@ -417,6 +474,10 @@ class cmd_ass(cli.CLICommand):
                 raise cmd_ass._error(src, "Expected ( or {")
             self.__symbol = src.content
 
+        @classmethod
+        def create(cls, *args, **kwargs) -> 'cmd_ass._Token':
+            return cls(*args, **kwargs)
+        
         #endregion
 
         #region operators
@@ -435,7 +496,7 @@ class cmd_ass(cli.CLICommand):
 
         #endregion
     
-    class _Token_ParClose(_Token):
+    class _TokenParClose(_Token):
 
         #region init
 
@@ -445,6 +506,10 @@ class cmd_ass(cli.CLICommand):
                 raise cmd_ass._error(src, "Expected ) or }")
             self.__symbol = src.content
 
+        @classmethod
+        def create(cls, *args, **kwargs) -> 'cmd_ass._Token':
+            return cls(*args, **kwargs)
+        
         #endregion
 
         #region operators
@@ -470,6 +535,10 @@ class cmd_ass(cli.CLICommand):
         def __init__(self, src:assutil.SrcChunk):
             super().__init__(src)
 
+        @classmethod
+        def create(cls, *args, **kwargs) -> 'cmd_ass._Token':
+            return cls(*args, **kwargs)
+        
         #endregion
 
         #region properties
@@ -486,6 +555,10 @@ class cmd_ass(cli.CLICommand):
         def __init__(self, src:assutil.SrcChunk):
             super().__init__(src)
 
+        @classmethod
+        def create(cls, *args, **kwargs) -> 'cmd_ass._Token':
+            return cls(*args, **kwargs)
+        
         #endregion
 
         #region properties
@@ -502,8 +575,8 @@ class cmd_ass(cli.CLICommand):
         @dataclass(frozen = True)
         class __P:
             tokens:tuple['cmd_ass._Token', ...]
-            open:'cmd_ass._Token_ParOpen'
-            close:'cmd_ass._Token_ParClose'
+            open:'cmd_ass._TokenParOpen'
+            close:'cmd_ass._TokenParClose'
 
         #endregion
 
@@ -513,7 +586,7 @@ class cmd_ass(cli.CLICommand):
             assert isinstance(p, self.__P)
             super().__init__(p.open.src)
             self.__p = p
-
+        
         #endregion
 
         #region operators
@@ -538,13 +611,13 @@ class cmd_ass(cli.CLICommand):
         #region helper methods
 
         @classmethod
-        def __blockify(cls, tokens_reversed:list['cmd_ass._Token'], open:'None|cmd_ass._Token_ParOpen'):
+        def __blockify(cls, tokens_reversed:list['cmd_ass._Token'], open:'None|cmd_ass._TokenParOpen'):
             blockified:list['cmd_ass._Token'] = []
             while len(tokens_reversed) > 0:
                 _token = tokens_reversed.pop()
-                if isinstance(_token, cmd_ass._Token_ParOpen):
+                if isinstance(_token, cmd_ass._TokenParOpen):
                     blockified.append(cast(cmd_ass._Token, cls.__blockify(tokens_reversed, _token)))
-                elif isinstance(_token, cmd_ass._Token_ParClose):
+                elif isinstance(_token, cmd_ass._TokenParClose):
                     if open is None:
                         raise cmd_ass._error(_token.src, "Unexpected closing bracket")
                     if open.symbol == '(' and _token.symbol != ')':
@@ -900,6 +973,7 @@ class cmd_ass(cli.CLICommand):
             self.__case = cast(bool, self.__cmd.case) # type: ignore
             if self.__output is None: output = self.__source.with_suffix('.a26')
             self.__p0_tokengroups:list[cmd_ass._TokenLabelDec|list[cmd_ass._Token]] = []
+            self.__p0_labels:dict[str, cmd_ass._TokenLabelDec] = {}
 
         #endregion
         
@@ -907,13 +981,15 @@ class cmd_ass(cli.CLICommand):
 
         def __phase0(self):
             self.__p0_tokengroups.clear()
+            self.__p0_labels.clear()
+            labelscope:list[str] = []
             for _line in self.__lines:
                 # Filter out labels
                 _start = 0
                 while _start < len(_line):
                     _chunk = _line[_start]
                     if not _chunk.content.endswith(':'): break
-                    self.__p0_tokengroups.append(cmd_ass._TokenLabelDec(_chunk, self.__case))
+                    self.__p0_tokengroups.append(cmd_ass._TokenLabelDec(_chunk, self.__p0_labels, labelscope, self.__case))
                     _start += 1
                 if _start == len(_line): continue
                 # First chunk
@@ -925,11 +1001,21 @@ class cmd_ass(cli.CLICommand):
                     _tokens.append(cmd_ass._TokenInstruct(_first))
                 # Next chunks
                 for _chunk in _line[1:]:
+                    _tokenptr = help.Ptr[cmd_ass._Token]()
+                    def _try_create(create:Callable, *args, **kwargs):
+                        nonlocal _tokenptr
+                        try:
+                            _tokenptr.value = create(*args, **kwargs)
+                            return True
+                        except NotImplementedError as _e: e = _e
+                        except TypeError as _e: e = _e 
+                        except: return False
+                        raise e
                     _chunk_first = _chunk.content[0]
                     if str_is_quotes(_chunk.content): # Is this a string?
                         _tokens.append(cmd_ass._TokenString(_chunk))
                     elif _chunk_first == '.': # Is this a label (lv1, lv2, ...) reference?
-                        _tokens.append(cmd_ass._TokenLabelRef(_chunk, self.__case))
+                        _tokens.append(cmd_ass._TokenLabelRef(_chunk, labelscope, self.__case))
                     elif _chunk_first == '$': # Is this a 6502-style hex number?
                         _tokens.append(cmd_ass._TokenNumber(_chunk))
                     elif _chunk_first == '%': # Is this a 6502-style bin number?
@@ -937,22 +1023,22 @@ class cmd_ass(cli.CLICommand):
                     elif _chunk_first.isdigit(): # Is this a number?
                         _tokens.append(cmd_ass._TokenNumber(_chunk))
                     elif str_is_word(_chunk.content):
-                        if cmd_ass._TokenRegRef.isvalid(_chunk.content): # Is this a register reference?
-                            _tokens.append(cmd_ass._TokenRegRef(_chunk))
-                        elif cmd_ass._TokenOperator.isvalid(_chunk.content): # Is this an operator?
-                            _tokens.append(cmd_ass._TokenOperator(_chunk))
+                        if _try_create(cmd_ass._TokenRegRef.create, _chunk): # Is this a register reference?
+                            _tokens.append(_tokenptr.value)
+                        elif _try_create(cmd_ass._TokenOperator.create, _chunk): # Is this an operator?
+                            _tokens.append(_tokenptr.value)
                         else: # Consider it a label reference
-                            _tokens.append(cmd_ass._TokenLabelRef(_chunk, self.__case))
-                    elif _chunk_first == '(' or _chunk_first == '{':  # Is this an open parenthesis?
-                        _tokens.append(cmd_ass._Token_ParOpen(_chunk))
-                    elif _chunk_first == ')' or _chunk_first == '}':  # Is this a close parenthesis?
-                        _tokens.append(cmd_ass._Token_ParClose(_chunk))
-                    elif _chunk_first == '#':  # Is this an immediate indicator?
-                        _tokens.append(cmd_ass._TokenImmediate(_chunk))
-                    elif _chunk_first == ',':  # Is this a delimiter?
-                        _tokens.append(cmd_ass._TokenDelimiter(_chunk))
-                    elif cmd_ass._TokenOperator.isvalid(_chunk.content): # Is this an operator?
-                        _tokens.append(cmd_ass._TokenOperator(_chunk))
+                            _tokens.append(cmd_ass._TokenLabelRef(_chunk, labelscope, self.__case))
+                    elif _try_create(cmd_ass._TokenParOpen.create, _chunk): # Is this an open parenthesis?
+                        _tokens.append(_tokenptr.value)
+                    elif _try_create(cmd_ass._TokenParClose.create, _chunk): # Is this a close parenthesis?
+                        _tokens.append(_tokenptr.value)
+                    elif _try_create(cmd_ass._TokenImmediate.create, _chunk): # Is this an immediate indicator?
+                        _tokens.append(_tokenptr.value)
+                    elif _try_create(cmd_ass._TokenDelimiter.create, _chunk): # Is this a delimiter?
+                        _tokens.append(_tokenptr.value)
+                    elif _try_create(cmd_ass._TokenOperator.create, _chunk): # Is this an operator?
+                        _tokens.append(_tokenptr.value)
                     else: # Invalid
                         raise cmd_ass._error(_chunk, f"Unexpected: {_chunk.content}")
                 # Add line
@@ -967,8 +1053,8 @@ class cmd_ass(cli.CLICommand):
             instance = cls(cmd, lines)
             instance.__phase0()
             # Test
-            for _tokens in instance.__p0_tokengroups:
-                print(cmd_ass._echo_tokens(_tokens))
+            # for _tokens in instance.__p0_tokengroups:
+            #     print(cmd_ass._echo_tokens(_tokens))
 
         #endregion
 

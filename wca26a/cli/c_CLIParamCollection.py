@@ -9,8 +9,8 @@ from .c_CLIParamCollectionParamDict import\
     CLIParamCollectionParamDict as _CLIParamCollectionParamDict
 from .c_CLIRequired import\
     CLIRequired as _CLIRequired
-from help.c_LockedList import\
-    LockedList as _LockedList
+from col.c_RoList import\
+    RoList as _RoList
 
 class CLIParamCollection:
     """
@@ -27,7 +27,7 @@ class CLIParamCollection:
         self.__col_reqparams:list[_CLIRequired] = []
         self.__col_optparams:dict[str, _CLIOption] = {}
         self.__col_shortcuts:dict[str, _CLIOption] = {}
-        self.__reqparams:_LockedList[_CLIRequired] = _LockedList[_CLIRequired](self.__col_reqparams)
+        self.__reqparams:_RoList[_CLIRequired] = _RoList[_CLIRequired](self.__col_reqparams)
         self.__optparams:_CLIParamCollectionParamDict[_CLIOption] = _CLIParamCollectionParamDict[_CLIOption](self.__col_optparams)
         self.__shortcuts:_CLIParamCollectionParamDict[_CLIOption] = _CLIParamCollectionParamDict[_CLIOption](self.__col_shortcuts)
 
