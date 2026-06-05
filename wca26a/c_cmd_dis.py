@@ -1,8 +1,9 @@
 __all__ = ['cmd_dis']
 
+import struct
 import sys
 
-from typing import cast
+from typing import Callable, cast
 from pathlib import Path
 
 import assutil
@@ -33,76 +34,186 @@ class cmd_dis(cli.CLICommand):
     #region methods
 
     def _main(self):
-        def _raise_if_oor(insaddr:int, destaddr:int):
-            if (destaddr & 0xF000) == 0xF000: return
-            raise cliutil.CommandError(f"${insaddr:04X} Address ${destaddr:04X} out of range.")
-        try: 
-            rom = cast(Path, self.rom) # type: ignore
-            output = cast(None|Path, self.output) # type: ignore
-            if output is None: output = rom.with_suffix('.asm')
-            # Read rom
-            rom_bytes = cliutil.FileUtil.read_all_bytes(rom)
-            if len(rom_bytes) < 0x1000: raise cliutil.CommandError("ROM is invalid")
+        rom = cast(Path, self.rom) # type: ignore
+        output = cast(None|Path, self.output) # type: ignore
+        if output is None: output = rom.with_suffix('.asm')
+        # ROM
+        rom_data:bytes = b''
+        rom_ins:list[None|assutil.AsmIns]
+        def rom_data_get(beg:int, size:int):
+            nonlocal rom_data
+            beg -= assutil.ROM_BEG
+            return rom_data[beg:(beg + size)]
+        def rom_ins_get(beg:int):
+            nonlocal rom_ins
+            beg -= assutil.ROM_BEG
+            return rom_ins[beg]
+        def rom_ins_vacant(beg:int, size:int):
+            nonlocal rom_ins
+            beg -= assutil.ROM_BEG
+            for _ in range(size):
+                if rom_ins[beg] is not None:
+                    return False
+                beg += 1
+            return True
+        def rom_ins_set(beg:int, ins:assutil.AsmIns):
+            nonlocal rom_ins
+            beg -= assutil.ROM_BEG
+            for _ in range(ins.type.mode.size):
+                rom_ins[beg] = ins
+                beg += 1
+        # Addresses
+        ADDR_ZERO_PREFIX = "ZP_"
+        ADDR_LABEL_PREFIX = "LABEL_"
+        ADDR_MISC_PREFIX = "MISC_"
+        def addr_pre(addr:int, s:str):
+            nonlocal addr_carts, addr_miscs
+            if addr >= assutil.ROM_BEG and addr < assutil.ROM_END:
+                return s.replace("$", ADDR_LABEL_PREFIX)
+            return s.replace("$", ADDR_MISC_PREFIX)
+        def addr_prezp(addr:int, s:str):
+            nonlocal ADDR_ZERO_PREFIX
+            return s.replace("$", ADDR_ZERO_PREFIX)
+        addr_zeros:set[int] = set() # Zero-page addresses
+        addr_carts:set[int] = set() # Cartridge addresses
+        addr_miscs:set[int] = set() # Misc addresses
+        def addr_add(addr:int):
+            nonlocal addr_carts, addr_miscs
+            if addr >= assutil.ROM_BEG and addr < assutil.ROM_END:
+                addr_carts.add(addr)
+            else:
+                addr_miscs.add(addr)
+            return
+        def addr_addzp(addr:int):
+            nonlocal addr_zeros
+            addr_zeros.add(addr)
+        # Instruction types
+        instype_prefuncs:dict[int, None|Callable[[int, str], str]] = {}
+        instype_addfuncs:dict[int, None|Callable[[int], None]] = {}
+        for _instype in assutil.ASMINSTYPES:
+            _instype_prefunc:None|Callable[[int, str], str] = None
+            _instype_addfunc:None|Callable[[int], None] = None
+            if _instype.mode.mode == assutil.AsmInsAddrMode.ABSOLUTE or \
+                    _instype.mode.mode == assutil.AsmInsAddrMode.X_INDEXED_ABSOLUTE or \
+                    _instype.mode.mode == assutil.AsmInsAddrMode.Y_INDEXED_ABSOLUTE or \
+                    _instype.mode.mode == assutil.AsmInsAddrMode.ABSOLUTE_INDIRECT or \
+                    _instype.mode.mode == assutil.AsmInsAddrMode.RELATIVE:
+                _instype_prefunc = addr_pre
+                _instype_addfunc = addr_add
+            elif _instype.mode.mode == assutil.AsmInsAddrMode.ZERO_PAGE or \
+                    _instype.mode.mode == assutil.AsmInsAddrMode.X_INDEXED_ZERO_PAGE or \
+                    _instype.mode.mode == assutil.AsmInsAddrMode.Y_INDEXED_ZERO_PAGE or \
+                    _instype.mode.mode == assutil.AsmInsAddrMode.X_INDEXED_ZERO_PAGE_INDIRECT or \
+                    _instype.mode.mode == assutil.AsmInsAddrMode.ZERO_PAGE_INDIRECT_Y_INDEXED:
+                _instype_prefunc = addr_prezp
+                _instype_addfunc = addr_addzp
+            instype_prefuncs[_instype.opcode] = _instype_prefunc
+            instype_addfuncs[_instype.opcode] = _instype_addfunc
+        # Main code
+        try:
+            rom_data = cliutil.FileUtil.read_all_bytes(rom)
+            rom_ins = [None for _ in range(assutil.ROM_BEG, assutil.ADDR_ENTRY)]
+            if len(rom_data) < assutil.ROM_SIZE: raise cliutil.CommandError("ROM size is invalid")
             # Create assembly
             asm = assutil.Asm()
-            asm.addr_entry = rom_bytes[0xFFC] | (rom_bytes[0xFFD] << 8)
-            asm.addr_break = rom_bytes[0xFFE] | (rom_bytes[0xFFF] << 8)
-            _raise_if_oor(0xFFC, asm.addr_entry)
+            asm.addr_entry = struct.unpack('<H', rom_data_get(assutil.ADDR_ENTRY, 2))[0]
+            asm.addr_break = struct.unpack('<H', rom_data_get(assutil.ADDR_BREAK, 2))[0]
+            if asm.addr_entry < assutil.ROM_BEG or asm.addr_entry > assutil.ROM_END:
+                raise cliutil.CommandError(f"${assutil.ADDR_ENTRY:04X} Address ${asm.addr_entry:04X} out of range.")
             # Disassemble
-            _instructions:list[None|assutil.AsmIns] = [None for _ in range(0xFFC)]
             _branches = [asm.addr_entry]
             while len(_branches) > 0:
-                _insbeg = _branches.pop() & 0xFFF
-                while _insbeg < 0xFFC and _instructions[_insbeg] is None:
+                _address = _branches.pop()
+                if _address < assutil.ROM_BEG or _address > assutil.ROM_END:
+                    continue
+                while _address < assutil.ADDR_ENTRY and rom_ins_get(_address) is None:
                     # Get opcode
-                    _opcode = rom_bytes[_insbeg]
-                    if not (_opcode in assutil.ASMINSTYPES):
-                        raise cliutil.CommandError(f"${_insbeg:04X} Invalid opcode ${_opcode:02X}.")
+                    _opcode = rom_data_get(_address, 1)[0]
+                    if not (_opcode in assutil.ASMINSTYPES): break
                     # Get instruction
                     _instype = assutil.ASMINSTYPES[_opcode]
-                    _insend = _insbeg + _instype.mode.size
-                    _ins = assutil.AsmIns(data = rom_bytes[_insbeg:_insend])
-                    # Make sure there's no overlap
-                    _overlap = False
-                    for _i in range(_insbeg + 1, _insend):
-                        if _instructions[_i] is None: continue
-                        _overlap = True
-                        break
-                    if _overlap: break
-                    # Add instruction
-                    for _i in range(_insbeg, _insend):
-                        _instructions[_i] = _ins
-                    # Next
+                    if not rom_ins_vacant(_address, _instype.mode.size): break
+                    _ins = assutil.AsmIns(data = rom_data_get(_address, _instype.mode.size))
+                    rom_ins_set(_address, _ins)
+                    # Add address (if relevant)
+                    _inputaddr = _instype.mode.absaddr(_address, _ins.input)
+                    _addfunc = instype_addfuncs[_opcode]
+                    if _addfunc is not None: _addfunc(_inputaddr)
+                    # Add branch (if relevant)
                     if _instype.prefix == assutil.AsmInsPrefix.JMP:
-                        _branches.append(_ins.input)
+                        _branches.append(_inputaddr)
                         break
-                    if _instype.prefix == assutil.AsmInsPrefix.JSR:
-                        _branches.append(_ins.input)
-                    elif _instype.mode.mode == assutil.AsmInsAddrMode.RELATIVE:
-                        _branches.append(_instype.mode.absaddr(0xF000 | _insbeg, _ins.input))
-                    _insbeg = _insend
+                    if _instype.prefix == assutil.AsmInsPrefix.JSR or\
+                            _instype.mode.mode == assutil.AsmInsAddrMode.RELATIVE:
+                        _branches.append(_inputaddr)
+                    # Next
+                    _address += _instype.mode.size
             # Print to file
-            out_lines:list[str] = []
-            out_lines.append(f"!ENTRY ${asm.addr_entry:04X}")
-            out_lines.append(f"!BREAK ${asm.addr_break:04X}")
-            _offset = 0
-            while _offset < 0xFFC:
-                _instruction = _instructions[_offset]
-                # Byte data
-                if _instruction is None:
-                    _bytes:list[int] = []
-                    while _offset < 0xFFC and _instructions[_offset] is None:
-                        _bytes.append(rom_bytes[_offset])
-                        _offset += 1
-                    while len(_bytes) > 16:
-                        out_lines.append(assutil.AsmByteString(bytes(_bytes[:16])).gen_str(0))
-                        for _ in range(16): _bytes.pop(0)
-                    out_lines.append(assutil.AsmByteString(bytes(_bytes)).gen_str(0))
-                    continue
-                # Actual instruction
-                out_lines.append(_instruction.gen_str(0xF000 | _offset))
-                _offset += _instruction.type.mode.size
-            assutil.FileUtil.write_all_lines(output, out_lines)
+            with cliutil.FileUtil.open_w(output) as _f:
+                # Entry-point, break-point
+                _f.write(f"!ENTRY ${asm.addr_entry:04X}\n")
+                _f.write(f"!BREAK ${asm.addr_break:04X}\n")
+                # Zero-page addresses
+                if len(addr_zeros) > 0:    
+                    _f.write('\n')
+                    for _addr in addr_zeros:
+                        _f.write(f"@DEFINE {ADDR_ZERO_PREFIX}{_addr:02X} ${_addr:02X}\n")
+                # Misc addresses
+                if len(addr_miscs) > 0:
+                    _f.write('\n')
+                    for _addr in addr_miscs:
+                        _f.write(f"@DEFINE {ADDR_MISC_PREFIX}{_addr:04X} ${_addr:04X}\n")
+                # Instructions/data
+                _lines:list[tuple[None|tuple[int, str], str]] = []
+                _labelled:set[int] = set()
+                _address = assutil.ROM_BEG
+                while _address < assutil.ADDR_ENTRY:
+                    _ins = rom_ins_get(_address)
+                    # Is this a labelled address
+                    if _address in addr_carts:
+                        _lines.append((None, f"\n{ADDR_LABEL_PREFIX}{_address:04X}:"))
+                        _labelled.add(_address)
+                    # Is this byte data?
+                    if _ins is None:
+                        _bytes:list[int] = [rom_data_get(_address, 1)[0]]
+                        _address += 1 # We already know this isn't an instruction
+                        while True:
+                            _stop = _address == assutil.ADDR_ENTRY or rom_ins_get(_address) is not None
+                            if _stop or _address in addr_carts:
+                                # Write bytes
+                                if len(_bytes) > 0:
+                                    while len(_bytes) > 16:
+                                        _lines.append((None, assutil.AsmByteString(bytes(_bytes[:16])).gen_str(0)))
+                                        for _ in range(16): _bytes.pop(0)
+                                    _lines.append((None, assutil.AsmByteString(bytes(_bytes)).gen_str(0)))
+                                    _bytes.clear()
+                                if _stop: break
+                                # Write label
+                                _lines.append((None, f"\n{ADDR_LABEL_PREFIX}{_address:04X}:"))
+                                _labelled.add(_address)
+                            _bytes.append(rom_data_get(_address, 1)[0])
+                            _address += 1
+                        continue
+                    # No!
+                    _ins_str = _ins.gen_str(_address)
+                    _ins_prefunc = instype_prefuncs[_ins.type.opcode]
+                    if _ins_prefunc is not None:
+                        _ins_absaddr = _ins.type.mode.absaddr(_address, _ins.input)
+                        _ins_prefixed = _ins_prefunc(_ins_absaddr, _ins_str)
+                        _lines.append(((_ins_absaddr, _ins_prefixed), _ins_str))
+                    else:
+                        _lines.append((None, _ins_str))
+                    _address += _ins.type.mode.size
+                _f.write('\n')
+                for _pre, _str in _lines:
+                    _sstr = _str
+                    # Fix for declared labels and macros
+                    if _pre is not None:
+                        _adr, _pfx = _pre
+                        if _adr in addr_zeros or _adr in addr_miscs or _adr in _labelled:
+                            _sstr = _pfx
+                    # Write line
+                    _f.write(f"{_sstr}\n")
             # Success!!!
             return 0
         except cliutil.CommandError as _e:
