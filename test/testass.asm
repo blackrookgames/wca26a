@@ -67,5 +67,5 @@ LAB_f04c:
     BNE LAB_f04c
     JMP LAB_f013
 
-; Remove this
-TEST {FDDSD (sdfsd MOD sdf + sfd) LSHFT sdfsdfdsf} ((()sdfsd))
+TEST ($32),Y
+TEST (($32)),Y

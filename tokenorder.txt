@@ -27,7 +27,7 @@ elif starts with digit
 elif a word
     if 'a', 'x', or 'y'
         it's a register reference
-    elif 'mod', 'b8', or 'b16'
+    elif word-style operator
         it's an operator
     else
         it's a label reference
