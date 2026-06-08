@@ -1,8 +1,8 @@
 ; WARNING: 
 ; This code is for educational purposes only.
 ; I will not be held responsible for any damages caused by running this code.
-!ENTRY $F000
-!BREAK $F000
+?ENTRY $F000
+?BREAK $F000
 BRK
 ORA ($00,X)
 ORA $00

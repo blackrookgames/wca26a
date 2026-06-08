@@ -1,0 +1,50 @@
+NONE
+B8
+B16
+STR
+REG
+TUPLE
+
+Value:
+    src
+    type
+    getvalue()
+
+ValueLiteral: B8, B16, STR, REG
+ValueLabelRef: B16
+ValueInPar: any
+ValueOperation: any
+
+B8 + B8 = B8
+B8 - B8 = B8
+B8 * B8 = B8
+B8 / B8 = B8
+B8 mod B8 = B8
+
+B8 & B8 = B8
+B8 | B8 = B8
+B8 ^ B8 = B8
+B8 lshft B8 = B8
+B8 rshft B8 = B8
+~ B8 = B8
+
+B16 + B16 = B16
+B16 - B16 = B16
+B16 * B16 = B16
+B16 / B16 = B16
+B16 mod B16 = B16
+
+B16 & B16 = B16
+B16 | B16 = B16
+B16 ^ B16 = B16
+B16 lshft B8 = B16
+B16 rshft B8 = B16
+~ B16 = B16
+< B16 = B8
+> B16 = B8
+
+STR + STR = STR
+STR * B8 = STR
+STR * B16 = STR
+
+TUPLE + TUPLE = TUPLE

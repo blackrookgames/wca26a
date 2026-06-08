@@ -51,3 +51,19 @@ class ADict(_Generic[TKey, TItem]):
         return key in self.__items
 
     #endregion
+
+    #region methods
+
+    def keys(self):
+        """
+        Generates a list of dictionary keys
+
+        :return: List of dictionary keys
+        """
+        return [_i for _i in self.__items.keys()]
+
+    def iter_keys(self):
+        """ Iterates thru the dictionary keys """
+        for _i in self.__items.keys(): yield _i
+
+    #endregion

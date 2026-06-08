@@ -1,0 +1,29 @@
+Pre-commands:
+Called before label addresses are determined
+Label references are NOT allowed
+
+!OFFSET <address>
+Sets the address position of the assembler to the specified address
+
+!BYTE [<value0>[, <value1>[, <value2> ...]]]
+Writes a series of bytes
+
+!BYTEFILL <value>, <len>
+Writes a byte value a specified number of times
+
+
+
+
+
+Post-commands:
+Called after label addresses are determined
+Label references are allowed
+
+?TEST [<value0>[, <value1>[, <value2> ...]]]
+Prints values to the screen
+
+?ENTRY <address>
+Sets the entry-point address
+
+?BREAK <address>
+Sets the break-point address

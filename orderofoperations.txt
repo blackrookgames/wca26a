@@ -1,0 +1,8 @@
+Parentheses
+Unary
+Multiplication/Division/Modulus
+Addition/Subtraction
+Bit Shift
+Bitwise AND
+Bitwise XOR
+Bitwise OR

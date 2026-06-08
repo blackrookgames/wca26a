@@ -151,8 +151,8 @@ class cmd_dis(cli.CLICommand):
             # Print to file
             with cliutil.FileUtil.open_w(output) as _f:
                 # Entry-point, break-point
-                _f.write(f"!ENTRY ${asm.addr_entry:04X}\n")
-                _f.write(f"!BREAK ${asm.addr_break:04X}\n")
+                _f.write(f"?ENTRY ${asm.addr_entry:04X}\n")
+                _f.write(f"?BREAK ${asm.addr_break:04X}\n")
                 # Zero-page addresses
                 if len(addr_zeros) > 0:    
                     _f.write('\n')

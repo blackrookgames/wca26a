@@ -1,8 +1,8 @@
 first chunk:
 if ends with ':'
     it's a label declaration (ex: 'mainlogic:')
-elif starts with '!'
-    it's an assembler command (ex: '!entry')
+elif starts with '!' or '?'
+    it's an assembler command (ex: '!byte' or '?entry')
 elif a word
     it's an assembly instruction (ex: 'lda')
 else

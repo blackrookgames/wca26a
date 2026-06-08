@@ -8,6 +8,8 @@ __all__ = [\
     'ASMINSADDRMODES',\
     'AsmInsType',\
     'ASMINSTYPES',\
+    'AsmPreMode',\
+    'ASMINSTYPES_BY_PREMODE',\
     'AsmIns']
 
 from dataclasses import\
@@ -1110,6 +1112,42 @@ class AsmInsType:
 
 ASMINSTYPES = AsmInsType.getall()
 """ All instruction types by opcode """
+
+#endregion
+
+#region AsmPreMode
+
+class AsmPreMode:
+    """ Represents an assembly instruction prefix accompanied by an addressing mode """
+
+    #region init
+
+    def __init__(self, prefix:AsmInsPrefix, addrmode:AsmInsAddrMode):
+        self.__prefix = prefix
+        self.__addrmode = addrmode
+
+    #endregion
+
+    #region operators
+
+    def __str__(self): return f"{self.__prefix.name} {self.__addrmode.name}"
+    
+    def __eq__(self, other): return self.__eq(other)
+    def __ne__(self, other): return not self.__eq(other)
+    def __hash__(self): return hash(self.__prefix)
+
+    #endregion
+
+    #region helper methods
+
+    def __eq(self, other):
+        if not isinstance(other, AsmPreMode): return False
+        return self.__prefix == other.__prefix and self.__addrmode == other.__addrmode
+
+    #endregion
+
+ASMINSTYPES_BY_PREMODE = _ADict[AsmPreMode, AsmInsType](ASMINSTYPES, lambda i: AsmPreMode(i.prefix, i.mode.mode))
+""" All instruction types by prefix and addressing mode """
 
 #endregion
 

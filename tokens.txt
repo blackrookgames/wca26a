@@ -10,7 +10,8 @@ lv0label:        Level 0 label declaration
 .lv1label:       Level 1 label declaration
 ..lv2label:      Level 2 label declaration
 
-!assdir          Assembler command
+!asspre          Assembler pre-command
+?asspos          Assembler post-command
 lda              6502 instruction name
 
 "string"         Text string

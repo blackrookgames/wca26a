@@ -1,7 +1,9 @@
 @include "./common.asm"
 
-!ENTRY LAB_f000
-!BREAK LAB_f000
+?ENTRY LAB_f000
+?BREAK LAB_f000
+
+?TEST (~ b8 b16 18 / 3) * 4 + 7 - (5 - 2)
 
 ; Zero page
 @define DAT_0000 $00
@@ -11,6 +13,8 @@
 @define DAT_0009 $09
 @define DAT_000e $0E
 @define DAT_0080 $80
+
+!OFFSET $F100
 
 ; Code beginning
 ; On the Atari 2600, cartridge ROM starts at $F000
@@ -66,6 +70,6 @@ LAB_f04c:
     CPX #0x1e
     BNE LAB_f04c
     JMP LAB_f013
-
-TEST ($32),Y
-TEST (($32)),Y
+    
+!BYTE 0x48, 0x45, 0x4c, 0x4c, 0x4f
+!BYTEFILL 0x10, 11
