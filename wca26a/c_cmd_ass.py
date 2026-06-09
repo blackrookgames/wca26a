@@ -1,6 +1,8 @@
 __all__ = ['cmd_ass']
 
 import math
+import os
+import struct
 import sys
 
 from collections.abc import Iterable, Sequence
@@ -1934,13 +1936,36 @@ class _LCIPostCommand(_LCICommand):
     def __init__(self, srctoken:_TokenCommand, labeldict:col.RoDict[str, int], rawinput:Iterable[_Token]):
         super().__init__(srctoken, labeldict, rawinput)
         if not srctoken.post: raise err(srctoken.src, "Looking for post-command, not pre-command.")
+        self.__cmd = self.__get_command(srctoken.src, self.name)
     
+    #endregion
+
+    #region helper methods
+
+    @classmethod
+    def __get_command(cls, src:assutil.SrcChunk, name:str) -> type['_PostCmd']:
+        ATTRNAME = "__valid_cmds"
+        # Create dictionary if missing
+        attr = cast(None|col.ADict[str, type[_PostCmd]], getattr(cls, ATTRNAME, None))
+        if attr is None:
+            _postfix = f"{_PostCmd.__name__}_"
+            attr = col.ADict[str, type[_PostCmd]](\
+                (_cmd for _cmd in _PostCmd.__subclasses__() if _cmd.__name__.startswith(_postfix)),\
+                lambda _cmd: _cmd.__name__[len(_postfix):])
+            setattr(cls, ATTRNAME, attr)
+        # Look for command
+        if not (name in attr): raise err(src, f"Unknown post-command: {name}")
+        return attr[name]
+
     #endregion
 
     #region methods
 
     def echo_format(self) -> str:
         return f"{CHR_ASS_POST}{self.name} {self._echo_input()}"
+
+    def call(self, postass:'_PostAss'):
+        self.__cmd.run(self, postass)
 
     #endregion
 
@@ -2110,17 +2135,21 @@ class _LCIInstruct(_LCI_CmdIns):
 
 #region PreAss
 
-class _PreAss:
+@dataclass(frozen = True)
+class _PreAssEntry:
+    value:bytes | _LCIInstruct
+    size:int
 
-    class Error(Exception):
-        pass
+class _PreAss:
 
     #region init
 
     def __init__(self):
-        self.__address = assutil.ROM_BEG
-        self.__items:list[None | int | _LCIInstruct] =\
-            [None for _ in range(assutil.ROM_BEG, assutil.ROM_END)]
+        self.__f_address = assutil.ROM_BEG
+        self.__f__data:dict[int, _PreAssEntry] = {}
+        self.__f_data = col.RoDict[int, _PreAssEntry](self.__f__data)
+        self.__f__occupied:dict[int, int] = {}
+        self.__f_occupied = col.RoDict[int, int](self.__f__occupied)
 
     #endregion
 
@@ -2128,42 +2157,234 @@ class _PreAss:
 
     @property
     def address(self):
-        """ Current address """
-        return self.__address
+        """ Current address of writer """
+        return self.__f_address
+
+    @property
+    def data(self):
+        """ Written data by address """
+        return self.__f_data
+    
+    @property
+    def occupied(self):
+        """
+        The keys represent addresses that have been written to.\n
+        The value of key is the address the marks the beginning address of the relavant piece of data.\n
+        Example:\n
+        If the instruction LDA $F102 is written to the address $F080,\n
+        Then addresses $F080, $F081, and $F082 will point to the address $F080.
+        """
+        return self.__f_occupied
     
     #endregion
 
     #region methods
 
     def goto(self, address:int):
-        """ :raises PreAss.Error: address is out of range """
-        if address < assutil.ROM_BEG or address > assutil.ROM_END:
-            raise _PreAss.Error("Address is out of range.")
-        self.__address = address
+        """ :raises help.BadOpError: address is out of range """
+        if address < assutil.ROM_BEG or address > assutil.ADDR_ENTRY:
+            raise help.BadOpError("Address is out of range.")
+        self.__f_address = address
     
     def write(self, content:bytes|_LCIInstruct):
-        """ :raises PreAss.Error: Address overlaps or exceeds ROM limit """
+        """ :raises help.BadOpError: Address overlaps or exceeds ROM limit """
         size = content.type.mode.size if (isinstance(content, _LCIInstruct)) else len(content)
-        beg = self.__address - assutil.ROM_BEG
-        end = beg + size
-        # Make sure it's safe to write
-        if end > len(self.__items): raise _PreAss.Error("ROM limit exceeded")
-        for _i in range(beg, end):
-            if self.__items[_i] is None: continue
-            raise _PreAss.Error("Overlap detected")
+        end = self.__f_address + size
+        # Make sure ROM limits won't be exceeded
+        if end > assutil.ADDR_ENTRY: raise help.BadOpError("ROM limit exceeded")
+        # Make sure no data will be overwritten
+        for _i in range(self.__f_address, end):
+            if not (_i in self.__f__occupied): continue
+            raise help.BadOpError("Overlap detected")
+        # Mark as occupied
+        for _i in range(self.__f_address, end): self.__f__occupied[_i] = self.__f_address
         # Write
-        if isinstance(content, _LCIInstruct):
-            for _i in range(beg, end):
-                self.__items[_i] = content
-        else:
-            if isinstance(content, memoryview): content = content.tobytes()
-            for _i in range(size): self.__items[beg + _i] = content[_i]
+        self.__f__data[self.__f_address] = _PreAssEntry(\
+            content.tobytes() if isinstance(content, memoryview) else content,\
+            size)
         # Increment address
-        self.__address += size
+        self.__f_address = end
 
-    def iter_data(self):
-        for _item in self.__items: yield _item
+    def clear(self):
+        self.__f_address = assutil.ROM_BEG
+        self.__f__data.clear()
+        self.__f__occupied.clear()
     
+    #endregion
+
+#endregion
+
+#region PostAss
+
+class _PostAss:
+
+    #region init
+
+    def __init__(self, output:Path, intmd:None|Path, cmds_group_addr:col.RoDict[int, col.RoList[_LCICommand]]):
+        self.__output = None
+        self.__intmd = None
+        self.__cmds_by_addr = cmds_group_addr
+        self.__address = assutil.ROM_BEG
+        self.__addr_entry:int = assutil.ROM_BEG
+        self.__addr_break:int = assutil.ROM_BEG
+        # Open files and do command check
+        try:
+            # Open files
+            self.__output = cliutil.FileUtil.open_wb(output)
+            if intmd is not None: self.__intmd = cliutil.FileUtil.open_w(intmd)
+            # Do command check
+            self.__cmd_check()
+        except:
+            self.close()
+            raise
+    
+    def __enter__(self):
+        return self
+    
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.close()
+        return False
+
+    #endregion
+
+    #region properties
+
+    @property
+    def address(self):
+        """ Current address of writer """
+        return self.__address
+
+    @property
+    def addr_entry(self):
+        """ Entry address """
+        return self.__addr_entry
+    @addr_entry.setter
+    def addr_entry(self, value:int):
+        self.__addr_entry = value
+    
+    @property
+    def addr_break(self):
+        """ Break address """
+        return self.__addr_break
+    @addr_break.setter
+    def addr_break(self, value:int):
+        self.__addr_break = value
+
+    #endregion
+
+    #region helper methods
+
+    def __raise_if_disposed(self):
+        if self.__output is not None: return
+        raise help.BadOpError("Object has already been disposed.")
+    
+    def __raise_if_exceeded(self, step:int):
+        if (self.__address + step) <= assutil.ADDR_ENTRY: return
+        raise help.BadOpError("ROM limit exceeded")
+
+    def __cmd_check(self):
+        if not (self.__address in self.__cmds_by_addr): return
+        for _cmd in self.__cmds_by_addr[self.__address]:
+            # Write to intermediate
+            if self.__intmd is not None:
+                # Command name
+                self.__intmd.write(CHR_ASS_POST if isinstance(_cmd, _LCIPostCommand) else CHR_ASS_PRE)
+                self.__intmd.write(f"{_cmd.name} ")
+                # Command args
+                for _i in range(len(_cmd.input)):
+                    if _i > 0: self.__intmd.write(', ')
+                    _in = _cmd.input[_i]
+                    self.__intmd.write(_in.type.echo(_in.get_value()))
+                self.__intmd.write('\n')
+            # Call post-command
+            if isinstance(_cmd, _LCIPostCommand): _cmd.call(self)
+            # Next
+            continue
+    
+    def __address_inc(self, step:int):
+        self.__raise_if_exceeded(step)
+        for _ in range(step):
+            self.__address += 1
+            self.__cmd_check()
+
+    #endregion
+
+    #region methods
+
+    def close(self):
+        if self.__output is not None:
+            # Pad
+            self.skip(assutil.ADDR_ENTRY - self.__address)
+            # Set entry point
+            self.__output.write(struct.pack('<H', self.__addr_entry))
+            self.__address += 2
+            # Set break point
+            self.__output.write(struct.pack('<H', self.__addr_break))
+            self.__address += 2
+            # Close
+            self.__output.close()
+            self.__output = None
+        if self.__intmd is not None:
+            self.__intmd.close()
+            self.__intmd = None
+
+    def skip(self, step:int):
+        """
+        :raises help.BadOpError:
+            Object has already been disposed\n
+            or\n
+            Address exceeds ROM limit
+        """
+        self.__raise_if_disposed()
+        self.__raise_if_exceeded(step)
+        assert self.__output is not None
+        self.__output.write(b'\00' * step)
+        self.__address_inc(step)
+
+    def write(self, data:_PreAssEntry):
+        """
+        :raises cliutil.CommandError:
+            Data is invalid branch instruction
+        :raises help.BadOpError:
+            Object has already been disposed\n
+            or\n
+            Address exceeds ROM limit
+        """
+        self.__raise_if_disposed()
+        self.__raise_if_exceeded(data.size)
+        assert self.__output is not None
+        # Is this an instruction?
+        if isinstance(data.value, _LCIInstruct):
+            # Get value
+            if data.value.practinput is not None:
+                _value = cast(int, data.value.practinput.get_value())
+                # Is this relative?
+                if data.value.type.mode.mode == assutil.AsmInsAddrMode.RELATIVE:
+                    _fixed = _value - (self.__address + data.size)
+                    if _fixed < -128 or _fixed > 127:
+                        raise err(data.value.src, "Branch out of range")
+                # No!
+                else: _fixed = _value
+            else:
+                _value = 0
+                _fixed = 0
+            # Generate instruction
+            _instruct = assutil.AsmIns(data.value.type.opcode, _fixed)
+            # Write to output
+            self.__output.write(_instruct.gen_bytes())
+            # Write to intermediate
+            if self.__intmd is not None:
+                _s = data.value.type.syntax.upper()
+                if data.value.practinput is not None:
+                    _s = _s.replace('$NNNN', '$NN').replace('$NN',\
+                        data.value.practinput.type.echo(_value))
+                self.__intmd.write(f"{_s}\n")
+            # Write to a26
+        # No! This is a block of data.
+        else: self.__output.write(data.value)
+        # Next
+        self.__address_inc(data.size)
+
     #endregion
 
 #endregion
@@ -2175,7 +2396,7 @@ class _PreCmd:
     #region helper methods
 
     @classmethod
-    def _verify_no_labels(cls, command:_LCICommand):
+    def _verify_no_labels(cls, command:_LCIPreCommand):
         def verify_no_labels(value:_OValue):
             nonlocal command
             # Make sure this is not a label reference
@@ -2213,7 +2434,7 @@ class _PreCmd:
         raise err(src, f"Cannot assign a {type.name} value to a {nouns} parameter.")
 
     @classmethod
-    def _verify_input_types(cls, command:_LCICommand, righttypes:tuple[_OType.Name|tuple[_OType.Name, ...], ...]):
+    def _verify_input_types(cls, command:_LCIPreCommand, righttypes:tuple[_OType.Name|tuple[_OType.Name, ...], ...]):
         if len(command.input) != len(righttypes):
             with StringIO() as _s:
                 _one = len(righttypes) == 1
@@ -2229,7 +2450,7 @@ class _PreCmd:
     #region run
     
     @classmethod
-    def run(cls, command:_LCICommand, preass:_PreAss) -> None:
+    def run(cls, command:_LCIPreCommand, preass:_PreAss) -> None:
         raise NotImplementedError("run has not been implemented.")
 
     #endregion
@@ -2241,7 +2462,7 @@ class _PreCmd_OFFSET(_PreCmd):
     __RIGHTTYPES = (_OType.Name.B16,)
     
     @classmethod
-    def run(cls, command:_LCICommand, preass:_PreAss):
+    def run(cls, command:_LCIPreCommand, preass:_PreAss):
         try:
             # Make sure input is valid
             cls._verify_no_labels(command)
@@ -2250,7 +2471,7 @@ class _PreCmd_OFFSET(_PreCmd):
             preass.goto(_OTypeB16.cast(command.input[0].get_value()))
             # Success!!!
             return
-        except _PreAss.Error as _e: e = err(command.src, _e)
+        except help.BadOpError as _e: e = err(command.src, _e)
         raise e
 
     #endregion
@@ -2260,7 +2481,7 @@ class _PreCmd_BYTE(_PreCmd):
     #region run
     
     @classmethod
-    def run(cls, command:_LCICommand, preass:_PreAss):
+    def run(cls, command:_LCIPreCommand, preass:_PreAss):
         try:
             # Make sure input is valid
             cls._verify_no_labels(command)
@@ -2270,7 +2491,7 @@ class _PreCmd_BYTE(_PreCmd):
             preass.write(bytes(_OTypeB8.cast(_arg.get_value()) for _arg in command.input))
             # Success!!!
             return
-        except _PreAss.Error as _e: e = err(command.src, _e)
+        except help.BadOpError as _e: e = err(command.src, _e)
         raise e
 
     #endregion
@@ -2282,7 +2503,7 @@ class _PreCmd_BYTEFILL(_PreCmd):
     __RIGHTTYPES = (_OType.Name.B8,(_OType.Name.B8, _OType.Name.B16,))
     
     @classmethod
-    def run(cls, command:_LCICommand, preass:_PreAss):
+    def run(cls, command:_LCIPreCommand, preass:_PreAss):
         try:
             # Make sure input is valid
             cls._verify_no_labels(command)
@@ -2293,8 +2514,101 @@ class _PreCmd_BYTEFILL(_PreCmd):
             preass.write(bytes(b for _ in range(s)))
             # Success!!!
             return
-        except _PreAss.Error as _e: e = err(command.src, _e)
+        except help.BadOpError as _e: e = err(command.src, _e)
         raise e
+
+    #endregion
+    
+#endregion
+
+#region PostCmd
+
+class _PostCmd:
+
+    #region helper methods
+
+    @classmethod
+    def _verify_input_type(cls, src:assutil.SrcChunk, type:_OType.Name, expected:_OType.Name|tuple[_OType.Name, ...]):
+        if isinstance(expected, tuple):
+            for _expected in expected:
+                if type == _expected: return 
+            if len(expected) == 0:
+                nouns = ""
+            elif len(expected) == 1:
+                nouns = expected[0].name
+            elif len(expected) == 2:
+                nouns = f"{expected[0].name} nor {expected[1].name}"
+            else:
+                with StringIO() as s:
+                    for _i in range(len(expected) - 1): s.write(f"{expected[_i].name}, ")
+                    s.write(f"nor {expected[-1].name}")
+                    nouns = s.getvalue()
+        else: 
+            if type == expected: return
+            nouns = expected.name
+        raise err(src, f"Cannot assign a {type.name} value to a {nouns} parameter.")
+
+    @classmethod
+    def _verify_input_types(cls, command:_LCIPostCommand, righttypes:tuple[_OType.Name|tuple[_OType.Name, ...], ...]):
+        if len(command.input) != len(righttypes):
+            with StringIO() as _s:
+                _one = len(righttypes) == 1
+                _s.write(f"{command.name} expects {len(righttypes)} ")
+                _s.write("argument" + ('' if _one else 's'))
+                _s.write(f" but {len(command.input)} {("was" if _one else "were")} received.")
+                raise err(command.src, _s.getvalue())
+        for _i in range(len(command.input)):
+            cls._verify_input_type(command.src, command.input[_i].type.name, righttypes[_i])
+
+    #endregion
+
+    #region run
+    
+    @classmethod
+    def run(cls, command:_LCIPostCommand, postass:_PostAss) -> None:
+        raise NotImplementedError("run has not been implemented.")
+
+    #endregion
+    
+class _PostCmd_TEST(_PostCmd):
+
+    #region run
+    
+    @classmethod
+    def run(cls, command:_LCIPostCommand, postass:_PostAss):
+        for _arg in command.input:
+            print(_arg.type.echo(_arg.get_value()), end = ' ')
+        print()
+
+    #endregion
+
+class _PostCmd_ENTRY(_PostCmd):
+
+    #region run
+    
+    __RIGHTTYPES = (_OType.Name.B16,)
+    
+    @classmethod
+    def run(cls, command:_LCIPostCommand, postass:_PostAss):
+        # Make sure input is valid
+        cls._verify_input_types(command, cls.__RIGHTTYPES)
+        # Set entry-point
+        postass.addr_entry = _OTypeB16.cast(command.input[0].get_value())
+
+    #endregion
+
+class _PostCmd_BREAK(_PostCmd):
+
+    #region run
+    
+    __RIGHTTYPES = (_OType.Name.B16,)
+    
+    @classmethod
+    def run(cls, command:_LCIPostCommand, postass:_PostAss):
+        # Make sure input is valid
+        cls._verify_input_types(command, cls.__RIGHTTYPES)
+        # Set break-point
+        postass.addr_break = _OTypeB16.cast(command.input[0].get_value())
 
     #endregion
     
@@ -2612,17 +2926,20 @@ class _Assembler:
     def __init__(self, cmd:'cmd_ass', lines:list[list[assutil.SrcChunk]]):
         self.__cmd = cmd
         self.__lines = lines
+        # Gather command input
+        output = cast(None|Path, self.__cmd.output) # type: ignore
         self.__source = cast(Path, self.__cmd.source) # type: ignore
-        self.__output = cast(None|Path, self.__cmd.output) # type: ignore
+        self.__output = output if (output is not None) else self.__source.with_suffix('.a26')
         self.__intmd = cast(None|Path, self.__cmd.intmd) # type: ignore
         self.__case = cast(bool, self.__cmd.case) # type: ignore
-        if self.__output is None: output = self.__source.with_suffix('.a26')
+        # Phase 0
         self.__p0_lcis:list[_LCI] = []
         self.__p0_labels:dict[str, _TokenLabelDec] = {}
+        # Phase 1
         self.__p1__labels:dict[str, int] = {}
         self.__p1_labels = col.RoDict[str, int](self.__p1__labels)
         self.__p1_cmds:dict[int, list[_LCICommand]] = {}
-        self.__p1_data:list[None | int | _LCIInstruct] = []
+        self.__p1_preass = _PreAss()
 
     #endregion
     
@@ -2699,90 +3016,53 @@ class _Assembler:
             else:
                 self.__p0_lcis.append(_LCIInstruct(_cmdins, self.__p1_labels, _input))
 
+    #endregion
+
+    #region phase 1
+
     def __phase1(self):
         self.__p1__labels.clear()
         self.__p1_cmds.clear()
-        self.__p1_data.clear()
+        self.__p1_preass.clear()
         # Compute positions of everything
-        preass = _PreAss()
         for _lci in self.__p0_lcis:
             # Is this a label?
             if isinstance(_lci, _LCILabel):
-                self.__p1__labels[_lci.path] = preass.address
+                self.__p1__labels[_lci.path] = self.__p1_preass.address
             # No! Is this a command?
             elif isinstance(_lci, _LCICommand):
                 # Call pre-command
-                if isinstance(_lci, _LCIPreCommand): _lci.call(preass)
+                if isinstance(_lci, _LCIPreCommand): _lci.call(self.__p1_preass)
                 # Add command to dictionary
-                if not (preass.address in self.__p1_cmds):
+                if not (self.__p1_preass.address in self.__p1_cmds):
                     _cmdlist:list[_LCICommand] = []
-                    self.__p1_cmds[preass.address] = _cmdlist
-                else: _cmdlist = self.__p1_cmds[preass.address]
+                    self.__p1_cmds[self.__p1_preass.address] = _cmdlist
+                else: _cmdlist = self.__p1_cmds[self.__p1_preass.address]
                 _cmdlist.append(_lci)
             # No! Is this an instruction?
             elif isinstance(_lci, _LCIInstruct):
-                try: preass.write(_lci)
-                except _PreAss.Error as _e: raise err(_lci.src, _e)
-        self.__p1_data.extend(preass.iter_data())
+                try: self.__p1_preass.write(_lci)
+                except help.BadOpError as _e: raise err(_lci.src, _e)
     
-    def __phase2(self):
-        intmd = None if (self.__intmd is None) else cliutil.FileUtil.open_w(self.__intmd)
-        try:
-            # cmd
-            def cmd_check():
-                nonlocal self
-                nonlocal intmd, addr_abs
-                if not (addr_abs in self.__p1_cmds): return
-                for _cmd in self.__p1_cmds[addr_abs]:
-                    # Write to intermediate
-                    if intmd is not None:
-                        # Command name
-                        intmd.write(CHR_ASS_POST if isinstance(_cmd, _LCIPostCommand) else CHR_ASS_PRE)
-                        intmd.write(f"{_cmd.name} ")
-                        # Command args
-                        for _i in range(len(_cmd.input)):
-                            if _i > 0: intmd.write(', ')
-                            _in = _cmd.input[_i]
-                            intmd.write(_in.type.echo(_in.get_value()))
-                        intmd.write('\n')
-                    # TODO: Call post-command
-                    # Next
-                    continue
-            # addr 
-            def addr_inc(step:int):
-                nonlocal addr_abs, addr_rel
-                for _i in range(step):
-                    addr_abs += 1
-                    addr_rel += 1
-                    cmd_check()
-            addr_abs = assutil.ROM_BEG
-            addr_rel = 0
-            cmd_check()
-            # Loop
-            while addr_rel < len(self.__p1_data):
-                _data = self.__p1_data[addr_rel]
-                # Is this empty?
-                if _data is None:
-                    addr_inc(1)
-                    continue
-                # No! Is this a block of bytes?
-                if isinstance(_data, int):
-                    # TODO: Write to a26
-                    addr_inc(1)
-                    continue
-                # No! This is an instruction
-                if intmd is not None:
-                    _s = _data.type.syntax.upper()
-                    if _data.practinput is not None:
-                        _v = _data.practinput.get_value()
-                        _s = _s.replace('$NNNN', '$NN').replace('$NN', _data.practinput.type.echo(_v))
-                    intmd.write(f"{_s}\n")
-                # TODO: Write to a26
-                # Next
-                addr_inc(_data.type.mode.size)
-        finally:
-            if intmd is not None: intmd.close()
+    #endregion
 
+    #region phase 2
+
+    def __phase2(self):
+        # Write
+        cmds_group_addr = col.RoDict[int, col.RoList[_LCICommand]]({\
+            _addr: col.RoList[_LCICommand](_cmds) for _addr, _cmds in self.__p1_cmds.items()})
+        try:
+            with _PostAss(self.__output, self.__intmd, cmds_group_addr) as postass:
+                for _curr_addr, _curr_data in sorted(self.__p1_preass.data.items(), key = lambda _item: _item[0]):
+                    # Is there a gap since the last piece of data?
+                    if _curr_addr > postass.address: postass.skip(_curr_addr - postass.address)
+                    # Write
+                    postass.write(_curr_data)
+        except:
+            if self.__output.is_file(): os.remove(self.__output)
+            if self.__intmd is not None and self.__intmd.is_file(): os.remove(self.__intmd)
+            raise
 
     #endregion
     

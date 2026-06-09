@@ -3,8 +3,6 @@
 ?ENTRY LAB_f000
 ?BREAK LAB_f000
 
-?TEST (~ b8 b16 18 / 3) * 4 + 7 - (5 - 2)
-
 ; Zero page
 @define DAT_0000 $00
 @define DAT_0001 $01
@@ -70,6 +68,3 @@ LAB_f04c:
     CPX #0x1e
     BNE LAB_f04c
     JMP LAB_f013
-    
-!BYTE 0x48, 0x45, 0x4c, 0x4c, 0x4f
-!BYTEFILL 0x10, 11
