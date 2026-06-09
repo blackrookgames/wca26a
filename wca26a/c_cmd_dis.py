@@ -156,12 +156,12 @@ class cmd_dis(cli.CLICommand):
                 # Zero-page addresses
                 if len(addr_zeros) > 0:    
                     _f.write('\n')
-                    for _addr in addr_zeros:
+                    for _addr in sorted(addr_zeros):
                         _f.write(f"@DEFINE {ADDR_ZERO_PREFIX}{_addr:02X} ${_addr:02X}\n")
                 # Misc addresses
                 if len(addr_miscs) > 0:
                     _f.write('\n')
-                    for _addr in addr_miscs:
+                    for _addr in sorted(addr_miscs):
                         _f.write(f"@DEFINE {ADDR_MISC_PREFIX}{_addr:04X} ${_addr:04X}\n")
                 # Instructions/data
                 _lines:list[tuple[None|tuple[int, str], str]] = []
