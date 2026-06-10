@@ -336,6 +336,7 @@ class cmd_dis(cli.CLICommand):
         if output is None: output = rom.with_suffix('.asm')
         try:
             # Read ROM
+            addr_nmi = 0
             addr_entry = 0
             addr_break = 0
             rom_data:dict[int, bytes|assutil.AsmIns] = {}
@@ -348,13 +349,17 @@ class cmd_dis(cli.CLICommand):
                 if _f.size > assutil.ROM_SIZE: raise cliutil.CommandError(\
                     "ROMs with bank switching are not supported. Output may be inaccurate.")
                 # Entry, break
-                _f.goto(assutil.ADDR_ENTRY)
-                addr_entry = _f.read_16()
-                addr_break = _f.read_16()
-                if addr_entry < assutil.ROM_BEG: raise cliutil.CommandError(\
+                _f.goto(assutil.ROM_VECTOR)
+                addr_nmi = _Addr(False, _f.read_16())
+                rom_address.add(addr_nmi)
+                addr_entry = _Addr(False, _f.read_16())
+                rom_address.add(addr_entry)
+                addr_break = _Addr(False, _f.read_16())
+                rom_address.add(addr_break)
+                if addr_entry.value < assutil.ROM_BEG: raise cliutil.CommandError(\
                     f"Entry-point address ${addr_entry:04X} is out of range.")
                 # Read instructions
-                _branches:list[int] = [addr_entry]
+                _branches:list[int] = [addr_entry.value]
                 while len(_branches) > 0:
                     _f.goto(_branches.pop(0))
                     while not (_f.address in rom_bytes_read):
@@ -395,11 +400,11 @@ class cmd_dis(cli.CLICommand):
                                 break
                 # Gather non-instructional data
                 _f.goto(_f.beg)
-                while _f.address < assutil.ADDR_ENTRY:
+                while _f.address < assutil.ROM_VECTOR:
                     # Skip over instructional data
                     if _f.address in rom_bytes_read:
                         _addr = _f.address + 1
-                        while _addr < assutil.ADDR_ENTRY:
+                        while _addr < assutil.ROM_VECTOR:
                             if not (_addr in rom_bytes_read): break
                             _addr += 1
                         _f.goto(_addr)
@@ -407,7 +412,7 @@ class cmd_dis(cli.CLICommand):
                     # Get byte data; make sure important addresses are considered
                     _beg = _f.address
                     _bytes:list[int] = [_f.read_8()]
-                    while _f.address < assutil.ADDR_ENTRY:
+                    while _f.address < assutil.ROM_VECTOR:
                         if _f.address in rom_bytes_read: break
                         if _Addr(False, _f.address) in rom_address: break
                         if _Addr(True, _f.address) in rom_address: break
@@ -459,10 +464,21 @@ class cmd_dis(cli.CLICommand):
                         nameaddrs[_i] = _NameAddr(_newname, _item.addr)
                         cmnaddrs[_item.addr] = _comment
             # Write output
+            def get_addr_label(dest:_Addr):
+                nonlocal nameaddrs, addrs_labelled, addrs_unlabelled
+                # Is the address labelled?
+                if (not dest.zp) and dest.value in addrs_labelled:
+                    return nameaddrs[addrs_labelled[dest.value]].name
+                # No! Is the address "macroed"?
+                elif dest in addrs_unlabelled:
+                    return nameaddrs[addrs_unlabelled[dest]].name
+                # No!
+                return str(dest)
             with cliutil.FileUtil.open_w(output) as _f:
                 # Write entry and break
-                _f.write(f"?ENTRY ${addr_entry:04X}\n")
-                _f.write(f"?BREAK ${addr_break:04X}\n")
+                _f.write(f"?NMI {get_addr_label(addr_nmi)}\n")
+                _f.write(f"?ENTRY {get_addr_label(addr_entry)}\n")
+                _f.write(f"?BREAK {get_addr_label(addr_break)}\n")
                 _f.write('\n')
                 # Write macros
                 _macros_cmn = {_k: _v for _k, _v in addrs_unlabelled.items() if _k in cmnaddrs}
@@ -499,17 +515,8 @@ class cmd_dis(cli.CLICommand):
                     else:
                         # Is the input an address?
                         if _data.type.mode.input_is_addr:
-                            _dest = self.__get_dest_addr(_addr, _data)
-                            # Is the address labelled?
-                            if (not _dest.zp) and _dest.value in addrs_labelled:
-                                _name = nameaddrs[addrs_labelled[_dest.value]].name
-                                _f.write(f"{self.__ins_input(_data, _name)}\n")
-                            # No! Is the address "macroed"?
-                            elif _dest in addrs_unlabelled:
-                                _name = nameaddrs[addrs_unlabelled[_dest]].name
-                                _f.write(f"{self.__ins_input(_data, _name)}\n")
-                            # No!
-                            else: _f.write(f"{_data.gen_str(_addr)}\n")
+                            _name = get_addr_label(self.__get_dest_addr(_addr, _data))
+                            _f.write(f"{self.__ins_input(_data, _name)}\n")
                         # No!
                         else: _f.write(f"{_data.gen_str(_addr)}\n")
                     # Next

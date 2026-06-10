@@ -207,11 +207,14 @@ ADDR_TIM64T = 0x0296
 ADDR_T1024T = 0x0297
 """ set 1024 clock interval (858.2 usec/interval) """
 
+ADDR_NMI = 0xFFFA
+""" Cart NMI Vector (16bit pointer) """
+
 ADDR_ENTRY = 0xFFFC
-""" Cart Entrypoint (16bit pointer) """
+""" Cart Entry Vector (16bit pointer) """
 
 ADDR_BREAK = 0xFFFC
-""" Cart Breakpoint (16bit pointer) """
+""" Cart Break Vector (16bit pointer) """
 
 #endregion
 
@@ -225,5 +228,8 @@ ROM_END = 0x10000
 
 ROM_SIZE = 0x10000 - 0xF000
 """ Size of a normal 4K cartridge """
+
+ROM_VECTOR = 0xFFFA
+""" Starting address of interrupt vectors """
 
 #endregion

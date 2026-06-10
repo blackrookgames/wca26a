@@ -1095,6 +1095,9 @@ class _OValueLabelRef(_OValue):
     @property
     def type(self): return self.__type
 
+    @property
+    def path(self): return self.__path
+
     #endregion
 
     #region methods
@@ -2182,7 +2185,7 @@ class _PreAss:
 
     def goto(self, address:int):
         """ :raises help.BadOpError: address is out of range """
-        if address < assutil.ROM_BEG or address > assutil.ADDR_ENTRY:
+        if address < assutil.ROM_BEG or address > assutil.ROM_VECTOR:
             raise help.BadOpError("Address is out of range.")
         self.__f_address = address
     
@@ -2191,7 +2194,7 @@ class _PreAss:
         size = content.type.mode.size if (isinstance(content, _LCIInstruct)) else len(content)
         end = self.__f_address + size
         # Make sure ROM limits won't be exceeded
-        if end > assutil.ADDR_ENTRY: raise help.BadOpError("ROM limit exceeded")
+        if end > assutil.ROM_VECTOR: raise help.BadOpError("ROM limit exceeded")
         # Make sure no data will be overwritten
         for _i in range(self.__f_address, end):
             if not (_i in self.__f__occupied): continue
@@ -2225,6 +2228,7 @@ class _PostAss:
         self.__intmd = None
         self.__cmds_by_addr = cmds_group_addr
         self.__address = assutil.ROM_BEG
+        self.__addr_nmi:int = assutil.ROM_BEG
         self.__addr_entry:int = assutil.ROM_BEG
         self.__addr_break:int = assutil.ROM_BEG
         # Open files and do command check
@@ -2255,6 +2259,14 @@ class _PostAss:
         return self.__address
 
     @property
+    def addr_nmi(self):
+        """ Non-Maskable Interrupt address (Typically unused) """
+        return self.__addr_nmi
+    @addr_nmi.setter
+    def addr_nmi(self, value:int):
+        self.__addr_nmi = value
+
+    @property
     def addr_entry(self):
         """ Entry address """
         return self.__addr_entry
@@ -2279,7 +2291,7 @@ class _PostAss:
         raise help.BadOpError("Object has already been disposed.")
     
     def __raise_if_exceeded(self, step:int):
-        if (self.__address + step) <= assutil.ADDR_ENTRY: return
+        if (self.__address + step) <= assutil.ROM_VECTOR: return
         raise help.BadOpError("ROM limit exceeded")
 
     def __cmd_check(self):
@@ -2314,7 +2326,10 @@ class _PostAss:
     def close(self):
         if self.__output is not None:
             # Pad
-            self.skip(assutil.ADDR_ENTRY - self.__address)
+            self.skip(assutil.ROM_VECTOR - self.__address)
+            # Set NMI
+            self.__output.write(struct.pack('<H', self.__addr_nmi))
+            self.__address += 2
             # Set entry point
             self.__output.write(struct.pack('<H', self.__addr_entry))
             self.__address += 2
@@ -2582,6 +2597,21 @@ class _PostCmd_TEST(_PostCmd):
 
     #endregion
 
+class _PostCmd_NMI(_PostCmd):
+
+    #region run
+    
+    __RIGHTTYPES = (_OType.Name.B16,)
+    
+    @classmethod
+    def run(cls, command:_LCIPostCommand, postass:_PostAss):
+        # Make sure input is valid
+        cls._verify_input_types(command, cls.__RIGHTTYPES)
+        # Set entry-point
+        postass.addr_nmi = _OTypeB16.cast(command.input[0].get_value())
+
+    #endregion
+
 class _PostCmd_ENTRY(_PostCmd):
 
     #region run
@@ -2624,7 +2654,7 @@ class _Preprocessor:
         self.__cmd = cmd
         self.__rawlines = assutil.FileUtil.read_all_lines(path)
         self.__directory = path.parent
-        self.__case = cast(bool, self.__cmd.case) # type: ignore
+        self.__case = not cast(bool, self.__cmd.nocase) # type: ignore
         self.__macros = macros
         # Phase 0
         self.__p0_chunksbyline:list[list[assutil.SrcChunk]] = []
@@ -2910,7 +2940,7 @@ class _Preprocessor:
     @classmethod
     def run(cls, cmd:'cmd_ass', path:Path):
         macros:dict[str, list[assutil.SrcChunk]] = {}
-        for _flag in cmd.flags: macros[_flag if self.case else _flag.upper()] = [] # type: ignore
+        for _flag in cmd.flags: macros[_flag.upper() if cmd.nocase else _flag] = [] # type: ignore
         return cls.__run(cmd, path, macros)
 
     #endregion
@@ -2931,7 +2961,7 @@ class _Assembler:
         self.__source = cast(Path, self.__cmd.source) # type: ignore
         self.__output = output if (output is not None) else self.__source.with_suffix('.a26')
         self.__intmd = cast(None|Path, self.__cmd.intmd) # type: ignore
-        self.__case = cast(bool, self.__cmd.case) # type: ignore
+        self.__case = not cast(bool, self.__cmd.nocase) # type: ignore
         # Phase 0
         self.__p0_lcis:list[_LCI] = []
         self.__p0_labels:dict[str, _TokenLabelDec] = {}
@@ -2948,6 +2978,7 @@ class _Assembler:
     def __phase0(self):
         self.__p0_lcis.clear()
         self.__p0_labels.clear()
+        # Parse source
         labelscope:list[str] = []
         for _line in self.__lines:
             # Filter out labels
@@ -3015,6 +3046,27 @@ class _Assembler:
                 else: self.__p0_lcis.append(_LCIPreCommand(_cmdins, self.__p1_labels, _input))
             else:
                 self.__p0_lcis.append(_LCIInstruct(_cmdins, self.__p1_labels, _input))
+        # Make sure all referenced labels have been defined
+        labelrefs:list[tuple[_LCI_CmdIns, str]] = []
+        def extract_labelrefs(cmdins:_LCI_CmdIns, value:_OValue):
+            nonlocal labelrefs
+            if isinstance(value, _OValueInPar):
+                if isinstance(value.input, tuple):
+                    for _input in value.input:
+                        extract_labelrefs(cmdins, _input)
+                else:
+                    extract_labelrefs(cmdins, value.input)
+            elif isinstance(value, _OValueOperation):
+                for _input in value.inputs:
+                    extract_labelrefs(cmdins, _input)
+            elif isinstance(value, _OValueLabelRef):
+                labelrefs.append((cmdins, value.path))
+        for _lci in self.__p0_lcis:
+            if not isinstance(_lci, _LCI_CmdIns): continue
+            for _i in _lci.input: extract_labelrefs(_lci, _i)
+        for _cmdins, _labelref in labelrefs:
+            if _labelref in self.__p0_labels: continue
+            raise err(_cmdins.src, f"The label {_labelref} has not been declared.")
 
     #endregion
 
@@ -3080,7 +3132,7 @@ class _Assembler:
 #endregion
 
 class cmd_ass(cli.CLICommand):
-    
+
     #region cli
 
     @property
@@ -3110,17 +3162,17 @@ class cmd_ass(cli.CLICommand):
         parse = cliutil.ParseUtil.to_set,\
         default = set())
     
-    __case = cli.CLIOptionFlagDef(\
-        name = "case",\
-        desc = "Require case-sensitive labels and macros")
+    __nocase = cli.CLIOptionFlagDef(\
+        name = "nocase",\
+        desc = "Allow case-insensitive labels and macros")
 
     #endregion
 
     #region methods
 
     def _main(self):
-        try: 
-            source = cast(Path, self.source) # type: ignore
+        source = cast(Path, self.source) # type: ignore
+        try:
             # Preprocess
             preprocessed = _Preprocessor.run(self, source)
             _Assembler.run(self, preprocessed)

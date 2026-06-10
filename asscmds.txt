@@ -22,6 +22,9 @@ Label references are allowed
 ?TEST [<value0>[, <value1>[, <value2> ...]]]
 Prints values to the screen
 
+?NMI <address>
+Sets the NMI address
+
 ?ENTRY <address>
 Sets the entry-point address
 
