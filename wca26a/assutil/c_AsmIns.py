@@ -6,6 +6,7 @@ __all__ = [\
     'AsmInsAddrMode',\
     'AsmInsAddrModeInfo',\
     'ASMINSADDRMODES',\
+    'AsmInsTypeCat',\
     'AsmInsType',\
     'ASMINSTYPES',\
     'AsmPreMode',\
@@ -250,7 +251,8 @@ class AsmInsAddrModeInfo:
     class __Info:
         mode:AsmInsAddrMode
         syntax:str
-        inputtype:AsmInsInputTypeInfo
+        input_type:AsmInsInputTypeInfo
+        input_is_addr:bool
         size:int
         gen:_Callable[[int, AsmInsPrefix, int], str]
         absaddr:_Callable[[int, int], int]
@@ -267,107 +269,120 @@ class AsmInsAddrModeInfo:
     def getall(cls):
         modes:list[AsmInsAddrModeInfo] = []
         # IMPLIED
-        modes.append(AsmInsAddrModeInfo(cls.__Info(
-            AsmInsAddrMode.IMPLIED,
-            '',
-            ASMINSINPUTTYPES[AsmInsInputType.NONE],
-            ASMINSINPUTTYPES[AsmInsInputType.NONE].size + 1,
+        modes.append(AsmInsAddrModeInfo(cls.__Info(\
+            AsmInsAddrMode.IMPLIED,\
+            '',\
+            ASMINSINPUTTYPES[AsmInsInputType.NONE],\
+            False,\
+            ASMINSINPUTTYPES[AsmInsInputType.NONE].size + 1,\
             lambda insaddr, prefix, input: f"{prefix.name}",\
             lambda insaddr, addr: 0)))
         # ACCUMULATOR
-        modes.append(AsmInsAddrModeInfo(cls.__Info(
-            AsmInsAddrMode.ACCUMULATOR,
-            "A",
-            ASMINSINPUTTYPES[AsmInsInputType.NONE],
-            ASMINSINPUTTYPES[AsmInsInputType.NONE].size + 1,
+        modes.append(AsmInsAddrModeInfo(cls.__Info(\
+            AsmInsAddrMode.ACCUMULATOR,\
+            "A",\
+            ASMINSINPUTTYPES[AsmInsInputType.NONE],\
+            False,\
+            ASMINSINPUTTYPES[AsmInsInputType.NONE].size + 1,\
             lambda insaddr, prefix, input: f"{prefix.name} A",\
             lambda insaddr, addr: 0)))
         # IMMEDIATE
-        modes.append(AsmInsAddrModeInfo(cls.__Info(
-            AsmInsAddrMode.IMMEDIATE,
-            "#$nn",
-            ASMINSINPUTTYPES[AsmInsInputType.BIT8],
-            ASMINSINPUTTYPES[AsmInsInputType.BIT8].size + 1,
+        modes.append(AsmInsAddrModeInfo(cls.__Info(\
+            AsmInsAddrMode.IMMEDIATE,\
+            "#$nn",\
+            ASMINSINPUTTYPES[AsmInsInputType.BIT8],\
+            False,\
+            ASMINSINPUTTYPES[AsmInsInputType.BIT8].size + 1,\
             lambda insaddr, prefix, input: f"{prefix.name} #${input:02X}",\
             lambda insaddr, addr: 0)))
         # ABSOLUTE
-        modes.append(AsmInsAddrModeInfo(cls.__Info(
-            AsmInsAddrMode.ABSOLUTE,
-            "$nnnn",
-            ASMINSINPUTTYPES[AsmInsInputType.BIT16],
-            ASMINSINPUTTYPES[AsmInsInputType.BIT16].size + 1,
+        modes.append(AsmInsAddrModeInfo(cls.__Info(\
+            AsmInsAddrMode.ABSOLUTE,\
+            "$nnnn",\
+            ASMINSINPUTTYPES[AsmInsInputType.BIT16],\
+            True,\
+            ASMINSINPUTTYPES[AsmInsInputType.BIT16].size + 1,\
             lambda insaddr, prefix, input: f"{prefix.name} ${input:04X}",\
             lambda insaddr, addr: addr)))
         # X_INDEXED_ABSOLUTE
-        modes.append(AsmInsAddrModeInfo(cls.__Info(
-            AsmInsAddrMode.X_INDEXED_ABSOLUTE,
-            "$nnnn,X",
-            ASMINSINPUTTYPES[AsmInsInputType.BIT16],
-            ASMINSINPUTTYPES[AsmInsInputType.BIT16].size + 1,
+        modes.append(AsmInsAddrModeInfo(cls.__Info(\
+            AsmInsAddrMode.X_INDEXED_ABSOLUTE,\
+            "$nnnn,X",\
+            ASMINSINPUTTYPES[AsmInsInputType.BIT16],\
+            True,\
+            ASMINSINPUTTYPES[AsmInsInputType.BIT16].size + 1,\
             lambda insaddr, prefix, input: f"{prefix.name} ${input:04X},X",\
             lambda insaddr, addr: addr)))
         # Y_INDEXED_ABSOLUTE
-        modes.append(AsmInsAddrModeInfo(cls.__Info(
-            AsmInsAddrMode.Y_INDEXED_ABSOLUTE,
-            "$nnnn,Y",
-            ASMINSINPUTTYPES[AsmInsInputType.BIT16],
-            ASMINSINPUTTYPES[AsmInsInputType.BIT16].size + 1,
+        modes.append(AsmInsAddrModeInfo(cls.__Info(\
+            AsmInsAddrMode.Y_INDEXED_ABSOLUTE,\
+            "$nnnn,Y",\
+            ASMINSINPUTTYPES[AsmInsInputType.BIT16],\
+            True,\
+            ASMINSINPUTTYPES[AsmInsInputType.BIT16].size + 1,\
             lambda insaddr, prefix, input: f"{prefix.name} ${input:04X},Y",\
             lambda insaddr, addr: addr)))
         # ABSOLUTE_INDIRECT
-        modes.append(AsmInsAddrModeInfo(cls.__Info(
-            AsmInsAddrMode.ABSOLUTE_INDIRECT,
-            "($nnnn)",
-            ASMINSINPUTTYPES[AsmInsInputType.BIT16],
-            ASMINSINPUTTYPES[AsmInsInputType.BIT16].size + 1,
+        modes.append(AsmInsAddrModeInfo(cls.__Info(\
+            AsmInsAddrMode.ABSOLUTE_INDIRECT,\
+            "($nnnn)",\
+            ASMINSINPUTTYPES[AsmInsInputType.BIT16],\
+            True,\
+            ASMINSINPUTTYPES[AsmInsInputType.BIT16].size + 1,\
             lambda insaddr, prefix, input: f"{prefix.name} (${input:04X})",\
             lambda insaddr, addr: addr)))
         # ZERO_PAGE
-        modes.append(AsmInsAddrModeInfo(cls.__Info(
-            AsmInsAddrMode.ZERO_PAGE,
-            "$nn",
-            ASMINSINPUTTYPES[AsmInsInputType.BIT8],
-            ASMINSINPUTTYPES[AsmInsInputType.BIT8].size + 1,
+        modes.append(AsmInsAddrModeInfo(cls.__Info(\
+            AsmInsAddrMode.ZERO_PAGE,\
+            "$nn",\
+            ASMINSINPUTTYPES[AsmInsInputType.BIT8],\
+            True,\
+            ASMINSINPUTTYPES[AsmInsInputType.BIT8].size + 1,\
             lambda insaddr, prefix, input: f"{prefix.name} ${input:02X}",\
             lambda insaddr, addr: addr)))
         # X_INDEXED_ZERO_PAGE
-        modes.append(AsmInsAddrModeInfo(cls.__Info(
-            AsmInsAddrMode.X_INDEXED_ZERO_PAGE,
-            "$nn,X",
-            ASMINSINPUTTYPES[AsmInsInputType.BIT8],
-            ASMINSINPUTTYPES[AsmInsInputType.BIT8].size + 1,
+        modes.append(AsmInsAddrModeInfo(cls.__Info(\
+            AsmInsAddrMode.X_INDEXED_ZERO_PAGE,\
+            "$nn,X",\
+            ASMINSINPUTTYPES[AsmInsInputType.BIT8],\
+            True,\
+            ASMINSINPUTTYPES[AsmInsInputType.BIT8].size + 1,\
             lambda insaddr, prefix, input: f"{prefix.name} ${input:02X},X",\
             lambda insaddr, addr: addr)))
         # Y_INDEXED_ZERO_PAGE
-        modes.append(AsmInsAddrModeInfo(cls.__Info(
-            AsmInsAddrMode.Y_INDEXED_ZERO_PAGE,
-            "$nn,Y",
-            ASMINSINPUTTYPES[AsmInsInputType.BIT8],
-            ASMINSINPUTTYPES[AsmInsInputType.BIT8].size + 1,
+        modes.append(AsmInsAddrModeInfo(cls.__Info(\
+            AsmInsAddrMode.Y_INDEXED_ZERO_PAGE,\
+            "$nn,Y",\
+            ASMINSINPUTTYPES[AsmInsInputType.BIT8],\
+            True,\
+            ASMINSINPUTTYPES[AsmInsInputType.BIT8].size + 1,\
             lambda insaddr, prefix, input: f"{prefix.name} ${input:02X},Y",\
             lambda insaddr, addr: addr)))
         # X_INDEXED_ZERO_PAGE_INDIRECT
-        modes.append(AsmInsAddrModeInfo(cls.__Info(
-            AsmInsAddrMode.X_INDEXED_ZERO_PAGE_INDIRECT,
-            "($nn,X)",
-            ASMINSINPUTTYPES[AsmInsInputType.BIT8],
-            ASMINSINPUTTYPES[AsmInsInputType.BIT8].size + 1,
+        modes.append(AsmInsAddrModeInfo(cls.__Info(\
+            AsmInsAddrMode.X_INDEXED_ZERO_PAGE_INDIRECT,\
+            "($nn,X)",\
+            ASMINSINPUTTYPES[AsmInsInputType.BIT8],\
+            True,\
+            ASMINSINPUTTYPES[AsmInsInputType.BIT8].size + 1,\
             lambda insaddr, prefix, input: f"{prefix.name} (${input:02X},X)",\
             lambda insaddr, addr: addr)))
         # ZERO_PAGE_INDIRECT_Y_INDEXED
-        modes.append(AsmInsAddrModeInfo(cls.__Info(
-            AsmInsAddrMode.ZERO_PAGE_INDIRECT_Y_INDEXED,
-            "($nn),Y",
-            ASMINSINPUTTYPES[AsmInsInputType.BIT8],
-            ASMINSINPUTTYPES[AsmInsInputType.BIT8].size + 1,
+        modes.append(AsmInsAddrModeInfo(cls.__Info(\
+            AsmInsAddrMode.ZERO_PAGE_INDIRECT_Y_INDEXED,\
+            "($nn),Y",\
+            ASMINSINPUTTYPES[AsmInsInputType.BIT8],\
+            True,\
+            ASMINSINPUTTYPES[AsmInsInputType.BIT8].size + 1,\
             lambda insaddr, prefix, input: f"{prefix.name} (${input:02X}),Y",\
             lambda insaddr, addr: addr)))
         # RELATIVE
-        modes.append(AsmInsAddrModeInfo(cls.__Info(
-            AsmInsAddrMode.RELATIVE,
-            "$nnnn",
-            ASMINSINPUTTYPES[AsmInsInputType.REL],
-            ASMINSINPUTTYPES[AsmInsInputType.REL].size + 1,
+        modes.append(AsmInsAddrModeInfo(cls.__Info(\
+            AsmInsAddrMode.RELATIVE,\
+            "$nnnn",\
+            ASMINSINPUTTYPES[AsmInsInputType.REL],\
+            True,\
+            ASMINSINPUTTYPES[AsmInsInputType.REL].size + 1,\
             lambda insaddr, prefix, input: f"{prefix.name} ${(insaddr + 2 + input):04X}",\
             lambda insaddr, addr: insaddr + 2 + addr)))
         # Return
@@ -388,9 +403,14 @@ class AsmInsAddrModeInfo:
         return self.__info.syntax
     
     @property
-    def inputtype(self):
+    def input_type(self):
         """ Input type """
-        return self.__info.inputtype
+        return self.__info.input_type
+
+    @property
+    def input_is_addr(self):
+        """ Whether or not the input refers to an address """
+        return self.__info.input_is_addr
 
     @property
     def size(self):
@@ -433,6 +453,30 @@ ASMINSADDRMODES = AsmInsAddrModeInfo.getall()
 
 #region AsmInsType
 
+class AsmInsTypeCat(_Enum):
+    LOAD = _auto()
+    """ Instruction either loads from or save to memory """
+    TRANS = _auto()
+    """ Instruction transfers values between different registers or between a register and the stack """
+    STACK = _auto()
+    """ Instruction is used manipulate the stack """
+    SHIFT = _auto()
+    """ Instruction performs a bit-shift operation """
+    LOGIC = _auto()
+    """ Instruction performs a bit-wise logic operation """
+    ARITH = _auto()
+    """ Instruction performs an addition, subtraction, or comparison operation """
+    INC = _auto()
+    """ Instruction performs an increment or decrement operation """
+    CTRL = _auto()
+    """ Instruction is used to control the flow of the program """
+    BRANCH = _auto()
+    """ Instruction performs a branch if a certain condition is met """
+    FLAGS = _auto()
+    """ Instruction manipulates the flag states """
+    NOP = _auto()
+    """ No operation """
+
 class AsmInsType:
     """ Represents a type of assembly instruction """
     
@@ -441,6 +485,7 @@ class AsmInsType:
     @_dataclass(frozen = True)
     class __Info:
         prefix:AsmInsPrefix
+        category:AsmInsTypeCat
         mode:AsmInsAddrModeInfo
         opcode:int
 
@@ -458,609 +503,760 @@ class AsmInsType:
     @classmethod
     def getall(cls):
         modes:list[AsmInsType] = []
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.BRK,
-            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.BRK,\
+            AsmInsTypeCat.CTRL,\
+            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],\
             0x00)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.CLC,
-            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.CLC,\
+            AsmInsTypeCat.FLAGS,\
+            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],\
             0x18)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.CLD,
-            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.CLD,\
+            AsmInsTypeCat.FLAGS,\
+            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],\
             0xD8)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.CLI,
-            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.CLI,\
+            AsmInsTypeCat.FLAGS,\
+            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],\
             0x58)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.CLV,
-            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.CLV,\
+            AsmInsTypeCat.FLAGS,\
+            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],\
             0xB8)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.DEX,
-            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.DEX,\
+            AsmInsTypeCat.INC,\
+            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],\
             0xCA)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.DEY,
-            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.DEY,\
+            AsmInsTypeCat.INC,\
+            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],\
             0x88)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.INX,
-            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.INX,\
+            AsmInsTypeCat.INC,\
+            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],\
             0xE8)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.INY,
-            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.INY,\
+            AsmInsTypeCat.INC,\
+            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],\
             0xC8)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.NOP,
-            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.NOP,\
+            AsmInsTypeCat.NOP,\
+            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],\
             0xEA)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.PHA,
-            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.PHA,\
+            AsmInsTypeCat.STACK,\
+            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],\
             0x48)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.PHP,
-            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.PHP,\
+            AsmInsTypeCat.STACK,\
+            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],\
             0x08)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.PLA,
-            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.PLA,\
+            AsmInsTypeCat.STACK,\
+            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],\
             0x68)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.PLP,
-            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.PLP,\
+            AsmInsTypeCat.STACK,\
+            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],\
             0x28)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.RTI,
-            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.RTI,\
+            AsmInsTypeCat.CTRL,\
+            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],\
             0x40)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.RTS,
-            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.RTS,\
+            AsmInsTypeCat.CTRL,\
+            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],\
             0x60)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.SEC,
-            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.SEC,\
+            AsmInsTypeCat.FLAGS,\
+            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],\
             0x38)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.SED,
-            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.SED,\
+            AsmInsTypeCat.FLAGS,\
+            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],\
             0xF8)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.SEI,
-            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.SEI,\
+            AsmInsTypeCat.FLAGS,\
+            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],\
             0x78)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.TAX,
-            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.TAX,\
+            AsmInsTypeCat.TRANS,\
+            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],\
             0xAA)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.TAY,
-            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.TAY,\
+            AsmInsTypeCat.TRANS,\
+            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],\
             0xA8)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.TSX,
-            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.TSX,\
+            AsmInsTypeCat.TRANS,\
+            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],\
             0xBA)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.TXA,
-            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.TXA,\
+            AsmInsTypeCat.TRANS,\
+            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],\
             0x8A)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.TXS,
-            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.TXS,\
+            AsmInsTypeCat.TRANS,\
+            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],\
             0x9A)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.TYA,
-            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.TYA,\
+            AsmInsTypeCat.TRANS,\
+            ASMINSADDRMODES[AsmInsAddrMode.IMPLIED],\
             0x98)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.ASL,
-            ASMINSADDRMODES[AsmInsAddrMode.ACCUMULATOR],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.ASL,\
+            AsmInsTypeCat.SHIFT,\
+            ASMINSADDRMODES[AsmInsAddrMode.ACCUMULATOR],\
             0x0A)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.LSR,
-            ASMINSADDRMODES[AsmInsAddrMode.ACCUMULATOR],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.LSR,\
+            AsmInsTypeCat.SHIFT,\
+            ASMINSADDRMODES[AsmInsAddrMode.ACCUMULATOR],\
             0x4A)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.ROL,
-            ASMINSADDRMODES[AsmInsAddrMode.ACCUMULATOR],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.ROL,\
+            AsmInsTypeCat.SHIFT,\
+            ASMINSADDRMODES[AsmInsAddrMode.ACCUMULATOR],\
             0x2A)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.ROR,
-            ASMINSADDRMODES[AsmInsAddrMode.ACCUMULATOR],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.ROR,\
+            AsmInsTypeCat.SHIFT,\
+            ASMINSADDRMODES[AsmInsAddrMode.ACCUMULATOR],\
             0x6A)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.ADC,
-            ASMINSADDRMODES[AsmInsAddrMode.IMMEDIATE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.ADC,\
+            AsmInsTypeCat.ARITH,\
+            ASMINSADDRMODES[AsmInsAddrMode.IMMEDIATE],\
             0x69)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.AND,
-            ASMINSADDRMODES[AsmInsAddrMode.IMMEDIATE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.AND,\
+            AsmInsTypeCat.LOGIC,\
+            ASMINSADDRMODES[AsmInsAddrMode.IMMEDIATE],\
             0x29)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.CMP,
-            ASMINSADDRMODES[AsmInsAddrMode.IMMEDIATE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.CMP,\
+            AsmInsTypeCat.ARITH,\
+            ASMINSADDRMODES[AsmInsAddrMode.IMMEDIATE],\
             0xC9)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.CPX,
-            ASMINSADDRMODES[AsmInsAddrMode.IMMEDIATE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.CPX,\
+            AsmInsTypeCat.ARITH,\
+            ASMINSADDRMODES[AsmInsAddrMode.IMMEDIATE],\
             0xE0)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.CPY,
-            ASMINSADDRMODES[AsmInsAddrMode.IMMEDIATE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.CPY,\
+            AsmInsTypeCat.ARITH,\
+            ASMINSADDRMODES[AsmInsAddrMode.IMMEDIATE],\
             0xC0)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.EOR,
-            ASMINSADDRMODES[AsmInsAddrMode.IMMEDIATE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.EOR,\
+            AsmInsTypeCat.LOGIC,\
+            ASMINSADDRMODES[AsmInsAddrMode.IMMEDIATE],\
             0x49)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.LDA,
-            ASMINSADDRMODES[AsmInsAddrMode.IMMEDIATE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.LDA,\
+            AsmInsTypeCat.LOAD,\
+            ASMINSADDRMODES[AsmInsAddrMode.IMMEDIATE],\
             0xA9)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.LDX,
-            ASMINSADDRMODES[AsmInsAddrMode.IMMEDIATE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.LDX,\
+            AsmInsTypeCat.LOAD,\
+            ASMINSADDRMODES[AsmInsAddrMode.IMMEDIATE],\
             0xA2)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.LDY,
-            ASMINSADDRMODES[AsmInsAddrMode.IMMEDIATE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.LDY,\
+            AsmInsTypeCat.LOAD,\
+            ASMINSADDRMODES[AsmInsAddrMode.IMMEDIATE],\
             0xA0)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.ORA,
-            ASMINSADDRMODES[AsmInsAddrMode.IMMEDIATE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.ORA,\
+            AsmInsTypeCat.LOGIC,\
+            ASMINSADDRMODES[AsmInsAddrMode.IMMEDIATE],\
             0x09)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.SBC,
-            ASMINSADDRMODES[AsmInsAddrMode.IMMEDIATE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.SBC,\
+            AsmInsTypeCat.ARITH,\
+            ASMINSADDRMODES[AsmInsAddrMode.IMMEDIATE],\
             0xE9)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.ADC,
-            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.ADC,\
+            AsmInsTypeCat.ARITH,\
+            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],\
             0x6D)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.AND,
-            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.AND,\
+            AsmInsTypeCat.LOGIC,\
+            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],\
             0x2D)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.ASL,
-            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.ASL,\
+            AsmInsTypeCat.SHIFT,\
+            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],\
             0x0E)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.BIT,
-            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.BIT,\
+            AsmInsTypeCat.LOGIC,\
+            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],\
             0x2C)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.CMP,
-            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.CMP,\
+            AsmInsTypeCat.ARITH,\
+            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],\
             0xCD)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.CPX,
-            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.CPX,\
+            AsmInsTypeCat.ARITH,\
+            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],\
             0xEC)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.CPY,
-            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.CPY,\
+            AsmInsTypeCat.ARITH,\
+            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],\
             0xCC)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.DEC,
-            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.DEC,\
+            AsmInsTypeCat.INC,\
+            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],\
             0xCE)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.EOR,
-            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.EOR,\
+            AsmInsTypeCat.LOGIC,\
+            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],\
             0x4D)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.INC,
-            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.INC,\
+            AsmInsTypeCat.INC,\
+            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],\
             0xEE)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.JMP,
-            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.JMP,\
+            AsmInsTypeCat.CTRL,\
+            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],\
             0x4C)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.JSR,
-            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.JSR,\
+            AsmInsTypeCat.CTRL,\
+            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],\
             0x20)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.LDA,
-            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.LDA,\
+            AsmInsTypeCat.LOAD,\
+            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],\
             0xAD)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.LDX,
-            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.LDX,\
+            AsmInsTypeCat.LOAD,\
+            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],\
             0xAE)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.LDY,
-            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.LDY,\
+            AsmInsTypeCat.LOAD,\
+            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],\
             0xAC)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.LSR,
-            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.LSR,\
+            AsmInsTypeCat.SHIFT,\
+            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],\
             0x4E)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.ORA,
-            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.ORA,\
+            AsmInsTypeCat.LOGIC,\
+            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],\
             0x0D)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.ROL,
-            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.ROL,\
+            AsmInsTypeCat.SHIFT,\
+            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],\
             0x2E)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.ROR,
-            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.ROR,\
+            AsmInsTypeCat.SHIFT,\
+            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],\
             0x6E)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.SBC,
-            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.SBC,\
+            AsmInsTypeCat.ARITH,\
+            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],\
             0xED)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.STA,
-            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.STA,\
+            AsmInsTypeCat.LOAD,\
+            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],\
             0x8D)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.STX,
-            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.STX,\
+            AsmInsTypeCat.LOAD,\
+            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],\
             0x8E)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.STY,
-            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.STY,\
+            AsmInsTypeCat.LOAD,\
+            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE],\
             0x8C)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.ADC,
-            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.ADC,\
+            AsmInsTypeCat.ARITH,\
+            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ABSOLUTE],\
             0x7D)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.AND,
-            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.AND,\
+            AsmInsTypeCat.LOGIC,\
+            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ABSOLUTE],\
             0x3D)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.ASL,
-            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.ASL,\
+            AsmInsTypeCat.SHIFT,\
+            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ABSOLUTE],\
             0x1E)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.CMP,
-            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.CMP,\
+            AsmInsTypeCat.ARITH,\
+            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ABSOLUTE],\
             0xDD)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.DEC,
-            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.DEC,\
+            AsmInsTypeCat.INC,\
+            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ABSOLUTE],\
             0xDE)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.EOR,
-            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.EOR,\
+            AsmInsTypeCat.LOGIC,\
+            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ABSOLUTE],\
             0x5D)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.INC,
-            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.INC,\
+            AsmInsTypeCat.INC,\
+            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ABSOLUTE],\
             0xFE)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.LDA,
-            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.LDA,\
+            AsmInsTypeCat.LOAD,\
+            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ABSOLUTE],\
             0xBD)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.LDY,
-            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.LDY,\
+            AsmInsTypeCat.LOAD,\
+            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ABSOLUTE],\
             0xBC)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.LSR,
-            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.LSR,\
+            AsmInsTypeCat.SHIFT,\
+            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ABSOLUTE],\
             0x5E)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.ORA,
-            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.ORA,\
+            AsmInsTypeCat.LOGIC,\
+            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ABSOLUTE],\
             0x1D)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.ROL,
-            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.ROL,\
+            AsmInsTypeCat.SHIFT,\
+            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ABSOLUTE],\
             0x3E)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.ROR,
-            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.ROR,\
+            AsmInsTypeCat.SHIFT,\
+            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ABSOLUTE],\
             0x7E)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.SBC,
-            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.SBC,\
+            AsmInsTypeCat.ARITH,\
+            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ABSOLUTE],\
             0xFD)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.STA,
-            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.STA,\
+            AsmInsTypeCat.LOAD,\
+            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ABSOLUTE],\
             0x9D)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.ADC,
-            ASMINSADDRMODES[AsmInsAddrMode.Y_INDEXED_ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.ADC,\
+            AsmInsTypeCat.ARITH,\
+            ASMINSADDRMODES[AsmInsAddrMode.Y_INDEXED_ABSOLUTE],\
             0x79)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.AND,
-            ASMINSADDRMODES[AsmInsAddrMode.Y_INDEXED_ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.AND,\
+            AsmInsTypeCat.LOGIC,\
+            ASMINSADDRMODES[AsmInsAddrMode.Y_INDEXED_ABSOLUTE],\
             0x39)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.CMP,
-            ASMINSADDRMODES[AsmInsAddrMode.Y_INDEXED_ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.CMP,\
+            AsmInsTypeCat.ARITH,\
+            ASMINSADDRMODES[AsmInsAddrMode.Y_INDEXED_ABSOLUTE],\
             0xD9)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.EOR,
-            ASMINSADDRMODES[AsmInsAddrMode.Y_INDEXED_ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.EOR,\
+            AsmInsTypeCat.LOGIC,\
+            ASMINSADDRMODES[AsmInsAddrMode.Y_INDEXED_ABSOLUTE],\
             0x59)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.LDA,
-            ASMINSADDRMODES[AsmInsAddrMode.Y_INDEXED_ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.LDA,\
+            AsmInsTypeCat.LOAD,\
+            ASMINSADDRMODES[AsmInsAddrMode.Y_INDEXED_ABSOLUTE],\
             0xB9)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.LDX,
-            ASMINSADDRMODES[AsmInsAddrMode.Y_INDEXED_ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.LDX,\
+            AsmInsTypeCat.LOAD,\
+            ASMINSADDRMODES[AsmInsAddrMode.Y_INDEXED_ABSOLUTE],\
             0xBE)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.ORA,
-            ASMINSADDRMODES[AsmInsAddrMode.Y_INDEXED_ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.ORA,\
+            AsmInsTypeCat.LOGIC,\
+            ASMINSADDRMODES[AsmInsAddrMode.Y_INDEXED_ABSOLUTE],\
             0x19)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.SBC,
-            ASMINSADDRMODES[AsmInsAddrMode.Y_INDEXED_ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.SBC,\
+            AsmInsTypeCat.ARITH,\
+            ASMINSADDRMODES[AsmInsAddrMode.Y_INDEXED_ABSOLUTE],\
             0xF9)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.STA,
-            ASMINSADDRMODES[AsmInsAddrMode.Y_INDEXED_ABSOLUTE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.STA,\
+            AsmInsTypeCat.LOAD,\
+            ASMINSADDRMODES[AsmInsAddrMode.Y_INDEXED_ABSOLUTE],\
             0x99)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.JMP,
-            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE_INDIRECT],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.JMP,\
+            AsmInsTypeCat.CTRL,\
+            ASMINSADDRMODES[AsmInsAddrMode.ABSOLUTE_INDIRECT],\
             0x6C)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.ADC,
-            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.ADC,\
+            AsmInsTypeCat.ARITH,\
+            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],\
             0x65)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.AND,
-            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.AND,\
+            AsmInsTypeCat.LOGIC,\
+            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],\
             0x25)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.ASL,
-            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.ASL,\
+            AsmInsTypeCat.SHIFT,\
+            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],\
             0x06)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.BIT,
-            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.BIT,\
+            AsmInsTypeCat.LOGIC,\
+            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],\
             0x24)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.CMP,
-            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.CMP,\
+            AsmInsTypeCat.ARITH,\
+            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],\
             0xC5)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.CPX,
-            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.CPX,\
+            AsmInsTypeCat.ARITH,\
+            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],\
             0xE4)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.CPY,
-            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.CPY,\
+            AsmInsTypeCat.ARITH,\
+            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],\
             0xC4)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.DEC,
-            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.DEC,\
+            AsmInsTypeCat.INC,\
+            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],\
             0xC6)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.EOR,
-            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.EOR,\
+            AsmInsTypeCat.LOGIC,\
+            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],\
             0x45)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.INC,
-            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.INC,\
+            AsmInsTypeCat.INC,\
+            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],\
             0xE6)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.LDA,
-            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.LDA,\
+            AsmInsTypeCat.LOAD,\
+            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],\
             0xA5)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.LDX,
-            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.LDX,\
+            AsmInsTypeCat.LOAD,\
+            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],\
             0xA6)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.LDY,
-            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.LDY,\
+            AsmInsTypeCat.LOAD,\
+            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],\
             0xA4)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.LSR,
-            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.LSR,\
+            AsmInsTypeCat.SHIFT,\
+            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],\
             0x46)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.ORA,
-            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.ORA,\
+            AsmInsTypeCat.LOGIC,\
+            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],\
             0x05)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.ROL,
-            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.ROL,\
+            AsmInsTypeCat.SHIFT,\
+            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],\
             0x26)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.ROR,
-            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.ROR,\
+            AsmInsTypeCat.SHIFT,\
+            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],\
             0x66)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.SBC,
-            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.SBC,\
+            AsmInsTypeCat.ARITH,\
+            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],\
             0xE5)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.STA,
-            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.STA,\
+            AsmInsTypeCat.LOAD,\
+            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],\
             0x85)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.STX,
-            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.STX,\
+            AsmInsTypeCat.LOAD,\
+            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],\
             0x86)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.STY,
-            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.STY,\
+            AsmInsTypeCat.LOAD,\
+            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE],\
             0x84)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.ADC,
-            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.ADC,\
+            AsmInsTypeCat.ARITH,\
+            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE],\
             0x75)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.AND,
-            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.AND,\
+            AsmInsTypeCat.LOGIC,\
+            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE],\
             0x35)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.ASL,
-            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.ASL,\
+            AsmInsTypeCat.SHIFT,\
+            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE],\
             0x16)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.CMP,
-            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.CMP,\
+            AsmInsTypeCat.ARITH,\
+            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE],\
             0xD5)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.DEC,
-            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.DEC,\
+            AsmInsTypeCat.INC,\
+            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE],\
             0xD6)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.EOR,
-            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.EOR,\
+            AsmInsTypeCat.LOGIC,\
+            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE],\
             0x55)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.INC,
-            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.INC,\
+            AsmInsTypeCat.INC,\
+            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE],\
             0xF6)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.LDA,
-            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.LDA,\
+            AsmInsTypeCat.LOAD,\
+            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE],\
             0xB5)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.LDY,
-            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.LDY,\
+            AsmInsTypeCat.LOAD,\
+            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE],\
             0xB4)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.LSR,
-            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.LSR,\
+            AsmInsTypeCat.SHIFT,\
+            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE],\
             0x56)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.ORA,
-            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.ORA,\
+            AsmInsTypeCat.LOGIC,\
+            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE],\
             0x15)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.ROL,
-            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.ROL,\
+            AsmInsTypeCat.SHIFT,\
+            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE],\
             0x36)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.ROR,
-            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.ROR,\
+            AsmInsTypeCat.SHIFT,\
+            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE],\
             0x76)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.SBC,
-            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.SBC,\
+            AsmInsTypeCat.ARITH,\
+            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE],\
             0xF5)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.STA,
-            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.STA,\
+            AsmInsTypeCat.LOAD,\
+            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE],\
             0x95)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.STY,
-            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.STY,\
+            AsmInsTypeCat.LOAD,\
+            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE],\
             0x94)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.LDX,
-            ASMINSADDRMODES[AsmInsAddrMode.Y_INDEXED_ZERO_PAGE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.LDX,\
+            AsmInsTypeCat.LOAD,\
+            ASMINSADDRMODES[AsmInsAddrMode.Y_INDEXED_ZERO_PAGE],\
             0xB6)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.STX,
-            ASMINSADDRMODES[AsmInsAddrMode.Y_INDEXED_ZERO_PAGE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.STX,\
+            AsmInsTypeCat.LOAD,\
+            ASMINSADDRMODES[AsmInsAddrMode.Y_INDEXED_ZERO_PAGE],\
             0x96)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.ADC,
-            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE_INDIRECT],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.ADC,\
+            AsmInsTypeCat.ARITH,\
+            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE_INDIRECT],\
             0x61)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.AND,
-            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE_INDIRECT],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.AND,\
+            AsmInsTypeCat.LOGIC,\
+            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE_INDIRECT],\
             0x21)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.CMP,
-            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE_INDIRECT],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.CMP,\
+            AsmInsTypeCat.ARITH,\
+            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE_INDIRECT],\
             0xC1)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.EOR,
-            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE_INDIRECT],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.EOR,\
+            AsmInsTypeCat.LOGIC,\
+            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE_INDIRECT],\
             0x41)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.LDA,
-            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE_INDIRECT],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.LDA,\
+            AsmInsTypeCat.LOAD,\
+            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE_INDIRECT],\
             0xA1)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.ORA,
-            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE_INDIRECT],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.ORA,\
+            AsmInsTypeCat.LOGIC,\
+            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE_INDIRECT],\
             0x01)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.SBC,
-            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE_INDIRECT],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.SBC,\
+            AsmInsTypeCat.ARITH,\
+            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE_INDIRECT],\
             0xE1)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.STA,
-            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE_INDIRECT],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.STA,\
+            AsmInsTypeCat.LOAD,\
+            ASMINSADDRMODES[AsmInsAddrMode.X_INDEXED_ZERO_PAGE_INDIRECT],\
             0x81)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.ADC,
-            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE_INDIRECT_Y_INDEXED],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.ADC,\
+            AsmInsTypeCat.ARITH,\
+            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE_INDIRECT_Y_INDEXED],\
             0x71)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.AND,
-            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE_INDIRECT_Y_INDEXED],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.AND,\
+            AsmInsTypeCat.LOGIC,\
+            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE_INDIRECT_Y_INDEXED],\
             0x31)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.CMP,
-            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE_INDIRECT_Y_INDEXED],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.CMP,\
+            AsmInsTypeCat.ARITH,\
+            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE_INDIRECT_Y_INDEXED],\
             0xD1)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.EOR,
-            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE_INDIRECT_Y_INDEXED],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.EOR,\
+            AsmInsTypeCat.LOGIC,\
+            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE_INDIRECT_Y_INDEXED],\
             0x51)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.LDA,
-            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE_INDIRECT_Y_INDEXED],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.LDA,\
+            AsmInsTypeCat.LOAD,\
+            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE_INDIRECT_Y_INDEXED],\
             0xB1)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.ORA,
-            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE_INDIRECT_Y_INDEXED],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.ORA,\
+            AsmInsTypeCat.LOGIC,\
+            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE_INDIRECT_Y_INDEXED],\
             0x11)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.SBC,
-            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE_INDIRECT_Y_INDEXED],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.SBC,\
+            AsmInsTypeCat.ARITH,\
+            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE_INDIRECT_Y_INDEXED],\
             0xF1)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.STA,
-            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE_INDIRECT_Y_INDEXED],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.STA,\
+            AsmInsTypeCat.LOAD,\
+            ASMINSADDRMODES[AsmInsAddrMode.ZERO_PAGE_INDIRECT_Y_INDEXED],\
             0x91)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.BCC,
-            ASMINSADDRMODES[AsmInsAddrMode.RELATIVE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.BCC,\
+            AsmInsTypeCat.BRANCH,\
+            ASMINSADDRMODES[AsmInsAddrMode.RELATIVE],\
             0x90)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.BCS,
-            ASMINSADDRMODES[AsmInsAddrMode.RELATIVE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.BCS,\
+            AsmInsTypeCat.BRANCH,\
+            ASMINSADDRMODES[AsmInsAddrMode.RELATIVE],\
             0xB0)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.BEQ,
-            ASMINSADDRMODES[AsmInsAddrMode.RELATIVE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.BEQ,\
+            AsmInsTypeCat.BRANCH,\
+            ASMINSADDRMODES[AsmInsAddrMode.RELATIVE],\
             0xF0)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.BMI,
-            ASMINSADDRMODES[AsmInsAddrMode.RELATIVE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.BMI,\
+            AsmInsTypeCat.BRANCH,\
+            ASMINSADDRMODES[AsmInsAddrMode.RELATIVE],\
             0x30)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.BNE,
-            ASMINSADDRMODES[AsmInsAddrMode.RELATIVE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.BNE,\
+            AsmInsTypeCat.BRANCH,\
+            ASMINSADDRMODES[AsmInsAddrMode.RELATIVE],\
             0xD0)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.BPL,
-            ASMINSADDRMODES[AsmInsAddrMode.RELATIVE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.BPL,\
+            AsmInsTypeCat.BRANCH,\
+            ASMINSADDRMODES[AsmInsAddrMode.RELATIVE],\
             0x10)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.BVC,
-            ASMINSADDRMODES[AsmInsAddrMode.RELATIVE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.BVC,\
+            AsmInsTypeCat.BRANCH,\
+            ASMINSADDRMODES[AsmInsAddrMode.RELATIVE],\
             0x50)))
-        modes.append(cls(cls.__Info(
-            AsmInsPrefix.BVS,
-            ASMINSADDRMODES[AsmInsAddrMode.RELATIVE],
+        modes.append(cls(cls.__Info(\
+            AsmInsPrefix.BVS,\
+            AsmInsTypeCat.BRANCH,\
+            ASMINSADDRMODES[AsmInsAddrMode.RELATIVE],\
             0x70)))
         # Return
         return _ADict[int, AsmInsType](modes, lambda _i: _i.__info.opcode)
@@ -1082,6 +1278,11 @@ class AsmInsType:
     def prefix(self):
         """ Prefix """
         return self.__info.prefix
+
+    @property
+    def category(self):
+        """ Category """
+        return self.__info.category
 
     @property
     def mode(self):
@@ -1179,12 +1380,12 @@ class AsmIns(_AsmItem):
             # Make sure data is of required size
             if len(data) != self.__type.mode.size:
                 raise _BadDataError("Opcode/data mismatch")
-            self.__input = self.__type.mode.inputtype.from_bytes(data[1:])
+            self.__input = self.__type.mode.input_type.from_bytes(data[1:])
         elif opcode is not None:
             if input is None:
                 raise ValueError("A definition for opcode must be accompanied by a definition for input.")
             self.__type = ASMINSTYPES[opcode]
-            self.__input = self.__type.mode.inputtype.sanitize(input)
+            self.__input = self.__type.mode.input_type.sanitize(input)
         else:
             raise ValueError("Either opcode or data must be defined.")
 
@@ -1210,7 +1411,7 @@ class AsmIns(_AsmItem):
         return self.__type.mode.gen(addr, self.__type.prefix, self.__input)
     
     def gen_bytes(self):
-        return bytes([self.__type.opcode]) + self.__type.mode.inputtype.to_bytes(self.__input)
+        return bytes([self.__type.opcode]) + self.__type.mode.input_type.to_bytes(self.__input)
 
     #endregion
 

@@ -36,6 +36,7 @@ class FileUtil:
         :raise CLICommandError: An error occurred
         """
         try:
+            t = open(path, 'rb')
             return open(path, 'rb', *args)
         except Exception as _e:
             e = _CLICommandError(_e)

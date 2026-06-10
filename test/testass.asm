@@ -12,7 +12,7 @@
 @define DAT_000e $0E
 @define DAT_0080 $80
 
-!OFFSET $F100
+!OFFSET $F000
 
 ; Code beginning
 ; On the Atari 2600, cartridge ROM starts at $F000

@@ -2,6 +2,7 @@ from .c_BadDataError import *
 from .c_BadOpError import *
 from .c_const import *
 from .c_ErrorUtil import *
+from .c_IOUtil import *
 from .c_ParseUtil import *
 from .c_ParseUtilResult import *
 from .c_ParseUtilStatus import *
