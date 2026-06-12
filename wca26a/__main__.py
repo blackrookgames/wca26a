@@ -1,11 +1,16 @@
 import sys
+from pathlib import Path
+
+SRC_FILE = Path(__file__).resolve()
+SRC_DIR = SRC_FILE.parent
+PRJ_DIR = SRC_DIR.parent
+sys.path.insert(0, str(PRJ_DIR.joinpath("engine")))
 
 import cli
 
 from c_cmd_help import *
 from c_cmd_test import *
 from c_cmd_ass import *
-from c_cmd_dbt import *
 from c_cmd_dis import *
 
 if __name__ == '__main__':

@@ -1,10 +1,19 @@
-__all__ = ['cmd_dbt']
+import sys
+from pathlib import Path
 
+SRC_FILE = Path(__file__).resolve()
+SRC_DIR = SRC_FILE.parent
+PRJ_DIR = SRC_DIR.parent
+sys.path.insert(0, str(PRJ_DIR.joinpath("engine")))
+
+import curses
 import struct
 import sys
+import time
 
 from collections.abc import Iterable, Sequence
 from enum import Enum, Flag
+from io import StringIO
 from typing import Callable, cast
 from pathlib import Path
 
@@ -285,7 +294,7 @@ class _System:
 
     #region init
 
-    def __init__(self, cmd:'cmd_dbt'):
+    def __init__(self, cmd:'command'):
         peek = cast(None|int, cmd.peek) # type: ignore
         nogarb = cast(bool, cmd.nogarb) # type: ignore
         stackwrap = cast(bool, cmd.stackwrap) # type: ignore
@@ -728,13 +737,13 @@ _INSFUNCS = InsFunc.get()
 
 #endregion
 
-class cmd_dbt(cli.CLICommand):
+class command(cli.CLICommand):
 
     #region cli
 
     @property
     def _desc(self) -> None|str:
-        return "Disassembles a ROM (NOTE: Bank switching not currently supported)"
+        return "Crappy analyzer of ROM code"
     
     __rom = cli.CLIRequiredDef(\
         name = "rom",\
@@ -782,58 +791,90 @@ class cmd_dbt(cli.CLICommand):
     #region methods
 
     def _main(self):
-        rom = cast(Path, self.rom) # type: ignore
-        peek = cast(None|int, self.peek) # type: ignore
-        nogarb = cast(bool, self.nogarb) # type: ignore
-        stackwrap = cast(bool, self.stackwrap) # type: ignore
         try:
-            VECTOR = assutil.ROM_VECTOR - assutil.ROM_BEG
-            addr_nmi = 0
-            addr_entry = 0
-            addr_break = 0
-            system = _System(self)
-            # Read ROM
-            with cliutil.FileUtil.open_rb(rom) as _f:
-                # Check size
-                size = help.IOUtil.get_size(_f)
-                if size < assutil.ROM_SIZE: raise cliutil.CommandError(\
-                    f"ROM must have a size of {assutil.ROM_SIZE} bytes.")
-                if size > assutil.ROM_SIZE: print(\
-                    "ROMs with bank switching are not supported.")
-                # NMI, entry, break
-                _f.seek(VECTOR)
-                addr_nmi:int = struct.unpack('<H', _f.read(2))[0]
-                addr_entry:int = struct.unpack('<H', _f.read(2))[0]
-                addr_break:int = struct.unpack('<H', _f.read(2))[0]
-                if addr_entry < assutil.ROM_BEG: raise cliutil.CommandError(\
-                    f"Entry-point address ${addr_entry:04X} is out of range.")
-                # Create memory
-                _f.seek(0)
-                system.memory.populate(assutil.ROM_BEG, _f.read(VECTOR))
-            # Begin execution
-            system.memory.goto(addr_entry)
-            while (True):
-                _pos = system.memory.pos
-                # Read opcode
-                _ins_opcode =  system.memory.read_8()
-                # Get instruction type
-                if not (_ins_opcode in assutil.ASMINSTYPES):
-                    raise cliutil.CommandError(f"${_pos:04X}: Invalid opcode ${_ins_opcode:02X}")
-                _ins_type = assutil.ASMINSTYPES[_ins_opcode]
-                # Read instruction
-                _ins_data = bytes([_ins_opcode]) + system.memory.read(max(0, _ins_type.mode.size - 1))
-                _ins = assutil.AsmIns(data = _ins_data)
-                # Perform instruction
-                _INSFUNCS[_ins.type.prefix.name](system, _pos, _ins)
-                # Should we stop?
-                if system.stop: break
-            # End of execution
-            print(f"End at ${system.memory.pos:04X}")
-            # Success!!!
+            curses.wrapper(self.__main)
             return 0
         except cliutil.CommandError as _e:
             print("ERROR", file = sys.stderr)
             print(_e, file = sys.stderr)
             return 1
+        
+    def __main(self, stdscr):
+        FIXED_W = 80
+        FIXED_H = 25
+        rom = cast(Path, self.rom) # type: ignore
+        # Enable non-blocking input mode
+        stdscr.nodelay(True)
+        # Enable the keypad to capture special keys like KEY_RESIZE
+        stdscr.keypad(True)
+        # Clear old structures and sync curses internal tracking
+        stdscr.clear()
+        curses.resizeterm(FIXED_H, FIXED_W)
+        # Read ROM
+        VECTOR = assutil.ROM_VECTOR - assutil.ROM_BEG
+        addr_nmi = 0
+        addr_entry = 0
+        addr_break = 0
+        system = _System(self)
+        resize_timer = 0
+        with cliutil.FileUtil.open_rb(rom) as _f:
+            # Check size
+            size = help.IOUtil.get_size(_f)
+            if size < assutil.ROM_SIZE: raise cliutil.CommandError(\
+                f"ROM must have a size of {assutil.ROM_SIZE} bytes.")
+            if size > assutil.ROM_SIZE: print(\
+                "ROMs with bank switching are not supported.")
+            # NMI, entry, break
+            _f.seek(VECTOR)
+            addr_nmi:int = struct.unpack('<H', _f.read(2))[0]
+            addr_entry:int = struct.unpack('<H', _f.read(2))[0]
+            addr_break:int = struct.unpack('<H', _f.read(2))[0]
+            if addr_entry < assutil.ROM_BEG: raise cliutil.CommandError(\
+                f"Entry-point address ${addr_entry:04X} is out of range.")
+            # Create memory
+            _f.seek(0)
+            system.memory.populate(assutil.ROM_BEG, _f.read(VECTOR))
+        # Begin execution
+        system.memory.goto(addr_entry)
+        while True:
+            _pos = system.memory.pos
+            # Read opcode
+            _ins_opcode =  system.memory.read_8()
+            # Get instruction type
+            if not (_ins_opcode in assutil.ASMINSTYPES):
+                raise cliutil.CommandError(f"${_pos:04X}: Invalid opcode ${_ins_opcode:02X}")
+            _ins_type = assutil.ASMINSTYPES[_ins_opcode]
+            # Read instruction
+            _ins_data = bytes([_ins_opcode]) + system.memory.read(max(0, _ins_type.mode.size - 1))
+            _ins = assutil.AsmIns(data = _ins_data)
+            # Perform instruction
+            _INSFUNCS[_ins.type.prefix.name](system, _pos, _ins)
+            # Should we stop?
+            if system.stop: break
+            # Test
+            for _i in range(128, 256, 16):
+                with StringIO() as _s:
+                    for _j in range(_i, _i + 16):
+                        _s.write(f" {system.memory[_j]:02X}")
+                    stdscr.addstr((_i - 128) // 16, 0, _s.getvalue())
+            # Fix window size
+            if resize_timer > 0:
+                resize_timer -= 1
+                if resize_timer == 0:
+                    stdscr.clear()
+                    curses.resizeterm(FIXED_H, FIXED_W)
+            # Read curses
+            key = stdscr.getch()
+            # Quit?
+            if key == ord('q'): break
+            # Was terminal window resized?
+            elif key == curses.KEY_RESIZE: resize_timer = 100
+            # Redraw
+            stdscr.refresh()
+            # Brief sleep
+            time.sleep(0.01)
 
     #endregion
+
+if __name__ == '__main__':
+    sys.exit(command().execute(sys.argv))

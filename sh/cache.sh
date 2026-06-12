@@ -1,7 +1,7 @@
 # Clears the cache files
 
 shdir="$(dirname $(realpath $BASH_SOURCE))"
-pydir="$(dirname $shdir)/wca26a"
+prjdir="$(dirname $shdir)"
 
 clrcache() {
     local _dir=$1
@@ -24,4 +24,6 @@ clrcache() {
     fi
 }
 
-clrcache $pydir
+clrcache "$prjdir/anal"
+clrcache "$prjdir/engine"
+clrcache "$prjdir/wca26a"
