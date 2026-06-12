@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>World's Crappiest Atari 2600 Assembler</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="../css/styles.css">
+</head>
+
+<header>
+    <nav class="nav">
+        <table class="nav-table">
+            <tr>
+                <td><a href="../index.html">HOME</a></td>
+                <td><a href="started.html">GET STARTED</a></td>
+                <td><a href="howtouse.html">HOW TO USE</a></td>
+            </tr>
+        </table>
+    </nav>
+</header>
+
+<body>
+    <div class="actual-body">
+        <h1 class="page-title">HOW TO USE</h1>
+        <div>
+            <p>Every terminal command follows this basic format</p>
+            <p><i>interpreter</i> wca26a <i>options</i> <i>args</i></p>
+            <h4>Example</h4>
+            <code>python3 wca26a ass --output pong_ripoff.a26 pong_ripoff.asm</code>
+        </div>
+        <div>
+            <h2>ass</h2>
+            <p>Assembles a ROM</p>
+            <p>ass [--help] [--output <i>value</i>] [--intmd <i>value</i>] [--flags <i>value</i>] [--nocase] <i>source</i></p>
+            <table class="namedesc">
+                <tr><td><i>source</i></td><td>Input path; (*.asm)</td></tr>
+                <tr><td>--help</td><td>Displays help</td></tr>
+                <tr><td>--output <i>value</i></td><td rowspan="2">Output path; (*.a26;*.bin)</td></tr>
+                <tr><td>-o <i>value</i></td></tr>
+                <tr><td>--intmd <i>value</i></td><td>Intermediate path; this can be used to see what source looks like after macros and labels are resolved.</td></tr>
+                <tr><td>--flags <i>value</i></td><td>Comma separated list of flags; these can be used during preprocessing to determine what code to include or exclude</td></tr>
+                <tr><td>--nocase</td><td>If specified, case-sensitivity will not be enforced</td></tr>
+            </table>
+            <p>NOTE: Bank switching not currently supported</p>
+            <h4>Example</h4>
+            <code>python3 wca26a ass --flags DEBUG,TESTING --output pong_ripoff.a26 pong_ripoff.asm</code>
+        </div>
+        <div>
+            <h2>dis</h2>
+            <p>Disassembles a ROM</p>
+            <p>ass [--help] [--output <i>value</i>] [--nocmn] <i>rom</i></p>
+            <table class="namedesc">
+                <tr><td><i>rom</i></td><td>ROM path (*.a26;*.bin)</td></tr>
+                <tr><td>--help</td><td>Displays help</td></tr>
+                <tr><td>--output <i>value</i></td><td rowspan="2">Output path; (*.asm)</td></tr>
+                <tr><td>-o <i>value</i></td></tr>
+                <tr><td>--nocmn</td><td>If specified, common definitions (VSYNC, COLUP0, etc) will not be used</td></tr>
+            </table>
+            <p>NOTE: Bank switching not currently supported</p>
+            <h4>Example</h4>
+            <code>python3 wca26a dis --nocmn -o space_game_disassembly.asm space_game.bin</code>
+        </div>
+    </div>
+</body>
+
+</html>

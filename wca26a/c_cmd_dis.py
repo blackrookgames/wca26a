@@ -13,8 +13,6 @@ import cliutil
 import col
 import help
 
-import random
-
 #region Reader
 
 class _Reader:
@@ -346,7 +344,7 @@ class cmd_dis(cli.CLICommand):
                 # Check size
                 if _f.size < assutil.ROM_SIZE: raise cliutil.CommandError(\
                     f"ROM must have a size of {assutil.ROM_SIZE} bytes.")
-                if _f.size > assutil.ROM_SIZE: raise cliutil.CommandError(\
+                if _f.size > assutil.ROM_SIZE: print(\
                     "ROMs with bank switching are not supported. Output may be inaccurate.")
                 # Entry, break
                 _f.goto(assutil.ROM_VECTOR)

@@ -5,6 +5,7 @@ import cli
 from c_cmd_help import *
 from c_cmd_test import *
 from c_cmd_ass import *
+from c_cmd_dbt import *
 from c_cmd_dis import *
 
 if __name__ == '__main__':
