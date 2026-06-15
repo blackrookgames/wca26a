@@ -77,7 +77,7 @@ class FileUtil:
     #region read_all_bytes, write_all_bytes
 
     @classmethod
-    def read_all_bytes(cls, path:str|_Path):
+    def read_all_bytes(cls, path:str|_Path) -> bytes:
         """
         Reads all byte data in a file
 

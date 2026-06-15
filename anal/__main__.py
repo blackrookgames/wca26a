@@ -6,13 +6,11 @@ SRC_DIR = SRC_FILE.parent
 PRJ_DIR = SRC_DIR.parent
 sys.path.insert(0, str(PRJ_DIR.joinpath("engine")))
 
-import curses
-import struct
+import boacon
 import sys
 import time
 
-from collections.abc import Iterable, Sequence
-from enum import Enum, Flag
+from dataclasses import dataclass
 from io import StringIO
 from typing import Callable, cast
 from pathlib import Path
@@ -21,719 +19,478 @@ import assutil
 import cli
 import cliutil
 import col
-import help
 
-import random
+import emu
 
-type InsFuncCall = Callable[['_System', int, assutil.AsmIns], None]
+#region Instruction
 
-#region CPU
+@dataclass(frozen = True)
+class Instruction:
+    """ Represents an executed instruction """
+    addr:int
+    """ Address of instruction """
+    ins:assutil.AsmIns
+    """ Actual instruction """
 
-class _CPU:
+#endregion
+
+#region Program
+
+class Program:
+    """ Represents a program """
 
     #region init
 
-    def __init__(self, rnd:bool, allowwrap:bool):
-        self.__a = random.randint(0x00, 0xFF) if rnd else 0
-        self.__x = random.randint(0x00, 0xFF) if rnd else 0
-        self.__y = random.randint(0x00, 0xFF) if rnd else 0
-        self.__stack = _CPUStack(rnd, allowwrap)
-        self.__flags = _CPUFlags.NONE
-    
+    def __init__(self, rom:bytes, nogarb:bool, stackwrap:bool):
+        """
+        Initializer for Program
+
+        :param rom: ROM data
+        :param nogarb: If true, initial garbage data will not be emulated
+        :param stackwrap: If true, stack pointer will wrap upon overflow/underflow; otherwise an EmuError is raised
+        :raise ValueError: rom does not have a length of 4096
+        """
+        if len(rom): ValueError(f"rom must have a length of {assutil.ROM_SIZE}")
+        self.__instructions = self.__get_instructions()
+        self.__rom = rom
+        self.__nogarb = nogarb
+        self.__stackwrap = stackwrap
+        self.reset()
+
+    #endregion
+
+    #region fields
+
+    __rom:bytes
+    __nogarb:bool
+    __stackwrap:bool
+
+    __system:emu.System
+    __error:None|str
+    __previous:None|Instruction
+
     #endregion
 
     #region properties
 
     @property
-    def a(self):
-        """ Accumulator """
-        return self.__a
-    @a.setter
-    def a(self, value:int):
-        self.__a = 0xFF & value
+    def system(self):
+        """ System data """
+        return self.__system
     
     @property
-    def x(self):
-        """ X Index Register """
-        return self.__x
-    @x.setter
-    def x(self, value:int):
-        self.__x = 0xFF & value
-        
+    def error(self):
+        """ If not None, it means an error occurred during the last step and the program will need to be reset. """
+        return self.__error
+
     @property
-    def y(self):
-        """ Y Index Register """
-        return self.__y
-    @y.setter
-    def y(self, value:int):
-        self.__y = 0xFF & value
-    
-    @property
-    def stack(self):
-        """ Stack """
-        return self.__stack
-    
-    @property
-    def flags(self):
-        """ Processor status flags """
-        return self.__flags
-    @flags.setter
-    def flags(self, value:'_CPUFlags'):
-        self.__flags = value
+    def previous(self):
+        """ Previously executed instruction """
+        return self.__previous
 
     #endregion
 
-class _CPUStack:
-    
-    #region init
+    #region methods
 
-    def __init__(self, rnd:bool, allowwrap:bool):
-        self.__bytes = bytearray(random.randbytes(0x100) if rnd else (b'\00' * 0x100))
-        self.__pos = len(self.__bytes)
-        self.__allowwrap = allowwrap
+    def reset(self):
+        """ Resets the program """
+        # Recreate system
+        self.__system = emu.System(self.__nogarb, self.__stackwrap)
+        # Add ROM
+        self.__system.memory.populate(assutil.ROM_BEG, self.__rom)
+        # Goto entry point
+        self.__system.memory.goto(self.__system.memory.ptr_entry)
+        # Reset error state
+        self.__error = None
 
-    #endregion
-
-    #region operations
-
-    def __len__(self):
-        return len(self.__bytes)
-    
-    def __getitem__(self, index:int):
-        try: return self.__bytes[index]
-        except Exception as _e: e = _e
-        self.__raise_if_oor(index)
-        raise e
-    
-    def __setitem__(self, index:int, value:int):
+    def step(self):
+        """
+        Steps thru the program.\n
+        If an error occurred during the last step, nothing happens.
+        """
+        # Make sure there's no error
+        if self.__error is not None: return
+        # Make note of current position
+        _pos = self.__system.memory.pos
+        # Read and execute
         try:
-            self.__bytes[index] = value & 0xFF
-            return
-        except Exception as _e: e = _e
-        self.__raise_if_oor(index)
-        raise e
-    
-    def __iter__(self):
-        for _b in self.__bytes: yield _b
-    
-    #endregion
-
-    #region properties
-
-    @property
-    def pos(self):
-        """ Position of stack pointer """
-        return self.__pos
-    @pos.setter
-    def pos(self, value:int):
-        if value < 0 or value > len(self.__bytes):
-            raise IndexError("Position is out of range.")
-        self.__pos = value
+            # Read opcode
+            _ins_opcode = self.__system.memory.read_8()
+            # Get instruction type
+            if not (_ins_opcode in assutil.ASMINSTYPES):
+                raise emu.EmuError(f"Invalid opcode ${_ins_opcode:02X}")
+            _ins_type = assutil.ASMINSTYPES[_ins_opcode]
+            # Read instruction
+            _ins_data = bytes([_ins_opcode]) + self.__system.memory.read(max(0, _ins_type.mode.size - 1))
+            _ins = Instruction(_pos, assutil.AsmIns(data = _ins_data))
+            # Perform instruction
+            self.__instructions[_ins_type.prefix.name](self, _ins) # type: ignore
+            # Update previous
+            self.__previous = _ins
+        except emu.EmuError as _e:
+            self.__error = f"${_pos:04X}: {_e}"
 
     #endregion
 
-    #region helper methods
-
-    def __raise_if_oor(self, index:int):
-        if index >= 0 and index < len(self.__bytes): return
-        raise IndexError("Index is out of range.")
-    
-    #endregion
-
-    #region methods
-
-    def push(self, value:int):
-        # Fix if overflow
-        if self.__pos == 0:
-            if (not self.__allowwrap):
-                raise cliutil.CommandError("Stack overflow")
-            self.__pos = len(self.__bytes)
-        # Decrement and set value
-        self.__pos -= 1
-        self.__bytes[self.__pos] = value & 0xFF
-        
-    def pull(self):
-        # Fix if underflow
-        if self.__pos == len(self.__bytes):
-            if (not self.__allowwrap):
-                raise cliutil.CommandError("Stack underflow")
-            self.__pos = 0
-        # Get value and increment
-        value = self.__bytes[self.__pos]
-        self.__pos += 1
-        return value
-
-    #endregion
-
-class _CPUFlags(Flag):
-
-    #region values
-
-    NONE = 0
-    NEGATIVE = 1 << 7
-    OVERFLOW = 1 << 6
-    EXPANSION = 1 << 5
-    BREAK = 1 << 4
-    DECIMAL = 1 << 3
-    INTDIS = 1 << 2
-    ZERO = 1 << 1
-    CARRY = 1 << 0
-
-    #endregion
-
-    #region methods
-
-    def isset(self, flag:'_CPUFlags'):
-        return (self.value & flag.value) != 0
-
-    def set(self, flag:'_CPUFlags', value:bool):
-        if value: return _CPUFlags(self.value | flag.value)
-        return _CPUFlags(self.value & (0xFF ^ flag.value))
-    
-    def set_multi(self, flagconds:Iterable[tuple['_CPUFlags', bool]]) -> '_CPUFlags':
-        flags = self
-        for flag, value in flagconds:
-            flags = flags.set(flag, value)
-        return flags
-
-    #endregion
-
-#endregion
-
-#region Memory
-
-class _Memory:
-
-    #region init
-
-    def __init__(self, rnd:bool):
-        # For the sake of simplicity, this will be 64 KB in size (since the memory addresses are 16-bit).
-        # In other words, this will not be an accurate emulation of the Atari VCS's memory.
-        self.__bytes = bytearray(random.randbytes(assutil.ROM_VECTOR) if rnd else (b'\00' * assutil.ROM_VECTOR))
-        self.__pos = 0
-    
-    #endregion
-
-    #region operations
-
-    def __len__(self):
-        return len(self.__bytes)
-    
-    def __getitem__(self, address:int):
-        try: return self.__bytes[address]
-        except Exception as _e: e = _e
-        self.__raise_if_oor(address)
-        raise e
-    
-    def __setitem__(self, address:int, value:int):
-        try:
-            self.__bytes[address] = value & 0xFF
-            return
-        except Exception as _e: e = _e
-        self.__raise_if_oor(address)
-        raise e
-    
-    def __iter__(self):
-        for _b in self.__bytes: yield _b
-    
-    #endregion
-
-    #region properties
-
-    @property
-    def pos(self):
-        """ Current position """
-        return self.__pos
-
-    #endregion
-
-    #region helper methods
-
-    def __raise_if_oor(self, address:int):
-        if address >= 0 and address < len(self.__bytes): return
-        raise IndexError("Address is out of range.")
-    
-    def __read(self, size:int) -> bytes:
-        newaddr = self.__pos + size
-        if newaddr <= len(self.__bytes):
-            oldaddr = self.__pos
-            self.__pos = newaddr
-            return bytes(self.__bytes[_i] for _i in range(oldaddr, newaddr))
-        raise cliutil.CommandError("ROM limit exceeded")
-    
-    #endregion
-
-    #region methods
-
-    def goto(self, address:int):
-        self.__raise_if_oor(address)
-        self.__pos = address
-    
-    def read(self, size:int):
-        return self.__read(max(0, size))
-    
-    def read_8(self):
-        return self.__read(1)[0]
-    
-    def read_16(self) -> int:
-        return struct.unpack('<H', self.__read(2))[0]
-    
-    def populate(self, offset:int, data:Sequence[int]):
-        if offset < 0 or (offset + len(data)) > len(self.__bytes):
-            raise IndexError("Out of range.")
-        for _i in range(len(data)):
-            self.__bytes[offset + _i] = data[_i]
-
-    #endregion
-
-#endregion
-
-#region System
-
-class _System:
-
-    #region init
-
-    def __init__(self, cmd:'command'):
-        peek = cast(None|int, cmd.peek) # type: ignore
-        nogarb = cast(bool, cmd.nogarb) # type: ignore
-        stackwrap = cast(bool, cmd.stackwrap) # type: ignore
-        self.__cpu = _CPU(not nogarb, stackwrap)
-        self.__memory = _Memory(not nogarb)
-        self.__peek = peek
-        self.__stop = False
-
-    #endregion
-
-    #region properties
-
-    @property
-    def cpu(self): return self.__cpu
-
-    @property
-    def memory(self): return self.__memory
-    
-    @property
-    def peek(self): return self.__peek
-
-    @property
-    def stop(self): return self.__stop
-    @stop.setter
-    def stop(self, value:bool): self.__stop = value
-
-    #endregion
-
-#endregion
-
-#region InsFunc
-
-class InsFunc:
-
-    #region helper methods
+    #region instructions
 
     @classmethod
-    def __get_value(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        if ins.type.mode.mode == assutil.AsmInsAddrMode.ACCUMULATOR:
-            return system.cpu.a
-        if ins.type.mode.mode == assutil.AsmInsAddrMode.IMMEDIATE:
-            return ins.input
-        if ins.type.mode.input_is_addr:
-            return system.memory[ins.type.mode.absaddr(addr, ins.input)]
-        return 0
-
-    @classmethod
-    def __set_value(cls, system:_System, addr:int, ins:assutil.AsmIns, value:int):
-        if ins.type.mode.mode == assutil.AsmInsAddrMode.ACCUMULATOR:
-            system.cpu.a = value
-        elif ins.type.mode.input_is_addr:
-            system.memory[ins.type.mode.absaddr(addr, ins.input)] = value
-    
-    @classmethod
-    def __update_nz(cls, system:_System, value:int):
-        system.cpu.flags = system.cpu.flags.set_multi((\
-            (_CPUFlags.NEGATIVE, (value & 0b10000000) != 0),\
-            (_CPUFlags.ZERO, value == 0),))
-        
-    @classmethod
-    def __print_if_peek(cls, system:_System, dest:int):
-        if system.peek is None: return
-        if system.peek == dest: print(f"${system.memory[dest]:02X}")
-
-    #endregion
-
-    #region methods
-
-    @classmethod
-    def get(cls):
-        PREFIX = "ins_"
-        funcs:dict[str, InsFuncCall] = {}
+    def __get_instructions(cls):
+        PREFIX = '__ins_'
+        instructions:dict[str, Callable] = {}
         for _attrname in dir(cls):
             _attr = getattr(cls, _attrname)
             if not callable(_attr): continue
             if not _attr.__name__.startswith(PREFIX): continue
-            funcs[_attr.__name__[len(PREFIX):]] = _attr.__call__
-        return col.RoDict[str, InsFuncCall](funcs)
+            instructions[_attr.__name__[len(PREFIX):]] = _attr.__call__
+        return col.RoDict[str, Callable](instructions)
+
+    #region helper
+
+    @classmethod
+    def __get_value(cls, system:emu.System, ins:Instruction):
+        if ins.ins.type.mode.mode == assutil.AsmInsAddrMode.ACCUMULATOR:
+            return system.cpu.a
+        if ins.ins.type.mode.mode == assutil.AsmInsAddrMode.IMMEDIATE:
+            return ins.ins.input
+        if ins.ins.type.mode.input_is_addr:
+            return system.memory[ins.ins.type.mode.absaddr(ins.addr, ins.ins.input)]
+        return 0
+
+    def __set_value(self, ins:Instruction, value:int):
+        if ins.ins.type.mode.mode == assutil.AsmInsAddrMode.ACCUMULATOR:
+            self.__system.cpu.a = value
+        elif ins.ins.type.mode.input_is_addr:
+            self.__system.memory[ins.ins.type.mode.absaddr(ins.addr, ins.ins.input)] = value
     
+    def __update_nz(self, value:int):
+        self.__system.cpu.flags = self.__system.cpu.flags.set_multi((\
+            (emu.CPUFlags.NEGATIVE, (value & 0b10000000) != 0),\
+            (emu.CPUFlags.ZERO, value == 0),))
+        
+    def __print_if_peek(self, dest:int):
+        # if system.peek is None: return
+        # if system.peek == dest: print(f"${system.memory[dest]:02X}")
+        pass
+
+    #endregion
+
     #region load/store
     
-    @classmethod
-    def ins_LDA(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        system.cpu.a = cls.__get_value(system, addr, ins)
-        cls.__update_nz(system, system.cpu.a)
+    def __ins_LDA(self, ins:Instruction):
+        self.__system.cpu.a = self.__get_value(self.__system, ins)
+        self.__update_nz(self.__system.cpu.a)
 
-    @classmethod
-    def ins_LDX(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        system.cpu.x = cls.__get_value(system, addr, ins)
-        cls.__update_nz(system, system.cpu.x)
+    def __ins_LDX(self, ins:Instruction):
+        self.__system.cpu.x = self.__get_value(self.__system, ins)
+        self.__update_nz(self.__system.cpu.x)
 
-    @classmethod
-    def ins_LDY(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        system.cpu.y = cls.__get_value(system, addr, ins)
-        cls.__update_nz(system, system.cpu.y)
+    def __ins_LDY(self, ins:Instruction):
+        self.__system.cpu.y = self.__get_value(self.__system, ins)
+        self.__update_nz(self.__system.cpu.y)
     
-    @classmethod
-    def ins_STA(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        dest = ins.type.mode.absaddr(addr, ins.input)
-        system.memory[dest] = system.cpu.a
-        cls.__print_if_peek(system, dest)
+    def __ins_STA(self, ins:Instruction):
+        dest = ins.ins.type.mode.absaddr(ins.addr, ins.ins.input)
+        self.__system.memory[dest] = self.__system.cpu.a
+        self.__print_if_peek(dest)
     
-    @classmethod
-    def ins_STX(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        dest = ins.type.mode.absaddr(addr, ins.input)
-        system.memory[dest] = system.cpu.x
-        cls.__print_if_peek(system, dest)
+    def __ins_STX(self, ins:Instruction):
+        dest = ins.ins.type.mode.absaddr(ins.addr, ins.ins.input)
+        self.__system.memory[dest] = self.__system.cpu.x
+        self.__print_if_peek(dest)
     
-    @classmethod
-    def ins_STY(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        dest = ins.type.mode.absaddr(addr, ins.input)
-        system.memory[dest] = system.cpu.y
-        cls.__print_if_peek(system, dest)
+    def __ins_STY(self, ins:Instruction):
+        dest = ins.ins.type.mode.absaddr(ins.addr, ins.ins.input)
+        self.__system.memory[dest] = self.__system.cpu.y
+        self.__print_if_peek(dest)
 
     #endregion
 
     #region transfer
     
-    @classmethod
-    def ins_TAX(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        system.cpu.x = system.cpu.a
-        cls.__update_nz(system, system.cpu.x)
+    def __ins_TAX(self, ins:Instruction):
+        self.__system.cpu.x = self.__system.cpu.a
+        self.__update_nz(self.__system.cpu.x)
     
-    @classmethod
-    def ins_TAY(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        system.cpu.y = system.cpu.a
-        cls.__update_nz(system, system.cpu.x)
+    def __ins_TAY(self, ins:Instruction):
+        self.__system.cpu.y = self.__system.cpu.a
+        self.__update_nz(self.__system.cpu.x)
     
-    @classmethod
-    def ins_TSX(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        system.cpu.x = system.cpu.stack.pos
-        cls.__update_nz(system, system.cpu.x)
+    def __ins_TSX(self, ins:Instruction):
+        self.__system.cpu.x = self.__system.cpu.stack.pos
+        self.__update_nz(self.__system.cpu.x)
     
-    @classmethod
-    def ins_TXA(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        system.cpu.a = system.cpu.x
-        cls.__update_nz(system, system.cpu.a)
+    def __ins_TXA(self, ins:Instruction):
+        self.__system.cpu.a = self.__system.cpu.x
+        self.__update_nz(self.__system.cpu.a)
     
-    @classmethod
-    def ins_TXS(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        system.cpu.stack.pos = system.cpu.x
+    def __ins_TXS(self, ins:Instruction):
+        self.__system.cpu.stack.pos = self.__system.cpu.x
     
-    @classmethod
-    def ins_TYA(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        system.cpu.a = system.cpu.y
-        cls.__update_nz(system, system.cpu.a)
+    def __ins_TYA(self, ins:Instruction):
+        self.__system.cpu.a = self.__system.cpu.y
+        self.__update_nz(self.__system.cpu.a)
 
     #endregion
 
     #region stack
     
-    @classmethod
-    def ins_PHA(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        system.cpu.stack.push(system.cpu.a)
+    def __ins_PHA(self, ins:Instruction):
+        self.__system.cpu.stack.push(self.__system.cpu.a)
     
-    @classmethod
-    def ins_PHP(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        system.cpu.stack.push(system.cpu.flags.value)
+    def __ins_PHP(self, ins:Instruction):
+        self.__system.cpu.stack.push(self.__system.cpu.flags.value)
 
-    @classmethod
-    def ins_PLA(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        system.cpu.a = system.cpu.stack.pull()
-        cls.__update_nz(system, system.cpu.a)
+    def __ins_PLA(self, ins:Instruction):
+        self.__system.cpu.a = self.__system.cpu.stack.pull()
+        self.__update_nz(self.__system.cpu.a)
     
-    @classmethod
-    def ins_PLP(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        system.cpu.flags = _CPUFlags(system.cpu.stack.pull())
+    def __ins_PLP(self, ins:Instruction):
+        self.__system.cpu.flags = emu.CPUFlags(self.__system.cpu.stack.pull())
 
     #endregion
 
     #region bit-shift
     
-    @classmethod
-    def ins_ASL(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        old = cls.__get_value(system, addr, ins)
+    def __ins_ASL(self, ins:Instruction):
+        old = self.__get_value(self.__system, ins)
         new = (old << 1) & 0xFF
-        cls.__set_value(system, addr, ins, new)
-        cls.__update_nz(system, new)
-        system.cpu.flags = system.cpu.flags.set(_CPUFlags.CARRY, (old & 0x80) != 0)
+        self.__set_value(ins, new)
+        self.__update_nz(new)
+        self.__system.cpu.flags = self.__system.cpu.flags.set(emu.CPUFlags.CARRY, (old & 0x80) != 0)
     
-    @classmethod
-    def ins_LSR(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        old = cls.__get_value(system, addr, ins)
+    def __ins_LSR(self, ins:Instruction):
+        old = self.__get_value(self.__system, ins)
         new = old >> 1
-        cls.__set_value(system, addr, ins, new)
-        cls.__update_nz(system, new)
-        system.cpu.flags = system.cpu.flags.set(_CPUFlags.CARRY, (old & 0x01) != 0)
+        self.__set_value(ins, new)
+        self.__update_nz(new)
+        self.__system.cpu.flags = self.__system.cpu.flags.set(emu.CPUFlags.CARRY, (old & 0x01) != 0)
     
-    @classmethod
-    def ins_ROL(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        old = cls.__get_value(system, addr, ins)
-        new = ((old << 1) & 0xFF) | (0x01 if system.cpu.flags.isset(_CPUFlags.CARRY) else 0x00)
-        cls.__set_value(system, addr, ins, new)
-        cls.__update_nz(system, new)
-        system.cpu.flags = system.cpu.flags.set(_CPUFlags.CARRY, (old & 0x80) != 0)
+    def __ins_ROL(self, ins:Instruction):
+        old = self.__get_value(self.__system, ins)
+        new = ((old << 1) & 0xFF) | (0x01 if self.__system.cpu.flags.isset(emu.CPUFlags.CARRY) else 0x00)
+        self.__set_value(ins, new)
+        self.__update_nz(new)
+        self.__system.cpu.flags = self.__system.cpu.flags.set(emu.CPUFlags.CARRY, (old & 0x80) != 0)
     
-    @classmethod
-    def ins_ROR(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        old = cls.__get_value(system, addr, ins)
-        new = (old >> 1) | (0x80 if system.cpu.flags.isset(_CPUFlags.CARRY) else 0x00)
-        cls.__set_value(system, addr, ins, new)
-        cls.__update_nz(system, new)
-        system.cpu.flags = system.cpu.flags.set(_CPUFlags.CARRY, (old & 0x01) != 0)
+    def __ins_ROR(self, ins:Instruction):
+        old = self.__get_value(self.__system, ins)
+        new = (old >> 1) | (0x80 if self.__system.cpu.flags.isset(emu.CPUFlags.CARRY) else 0x00)
+        self.__set_value(ins, new)
+        self.__update_nz(new)
+        self.__system.cpu.flags = self.__system.cpu.flags.set(emu.CPUFlags.CARRY, (old & 0x01) != 0)
     
     #endregion
 
     #region logic
 
-    @classmethod
-    def ins_AND(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        system.cpu.a &= cls.__get_value(system, addr, ins)
-        cls.__update_nz(system, system.cpu.a)
+    def __ins_AND(self, ins:Instruction):
+        self.__system.cpu.a &= self.__get_value(self.__system, ins)
+        self.__update_nz(self.__system.cpu.a)
     
-    @classmethod
-    def ins_BIT(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        value = cls.__get_value(system, addr, ins)
-        system.cpu.flags = system.cpu.flags.set_multi((\
-            (_CPUFlags.NEGATIVE, (value & 0b10000000) != 0),\
-            (_CPUFlags.OVERFLOW, (value & 0b01000000) != 0),\
-            (_CPUFlags.ZERO, (system.cpu.a & value) == 0),))
+    def __ins_BIT(self, ins:Instruction):
+        value = self.__get_value(self.__system, ins)
+        self.__system.cpu.flags = self.__system.cpu.flags.set_multi((\
+            (emu.CPUFlags.NEGATIVE, (value & 0b10000000) != 0),\
+            (emu.CPUFlags.OVERFLOW, (value & 0b01000000) != 0),\
+            (emu.CPUFlags.ZERO, (self.__system.cpu.a & value) == 0),))
     
-    @classmethod
-    def ins_EOR(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        system.cpu.a ^= cls.__get_value(system, addr, ins)
-        cls.__update_nz(system, system.cpu.a)
+    def __ins_EOR(self, ins:Instruction):
+        self.__system.cpu.a ^= self.__get_value(self.__system, ins)
+        self.__update_nz(self.__system.cpu.a)
     
-    @classmethod
-    def ins_ORA(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        system.cpu.a |= cls.__get_value(system, addr, ins)
-        cls.__update_nz(system, system.cpu.a)
+    def __ins_ORA(self, ins:Instruction):
+        self.__system.cpu.a |= self.__get_value(self.__system, ins)
+        self.__update_nz(self.__system.cpu.a)
     
     #endregion
 
     #region arithmetic
 
-    @classmethod
-    def ins_ADC(cls, system:_System, addr:int, ins:assutil.AsmIns):
+    def __ins_ADC(self, ins:Instruction):
         # TODO: Ensure calculations are correct
-        value = system.cpu.a + cls.__get_value(system, addr, ins) +\
-            (1 if system.cpu.flags.isset(_CPUFlags.CARRY) else 0)
-        old = system.cpu.a
-        system.cpu.a = value & 0xFF
+        value = self.__system.cpu.a + self.__get_value(self.__system, ins) +\
+            (1 if self.__system.cpu.flags.isset(emu.CPUFlags.CARRY) else 0)
+        old = self.__system.cpu.a
+        self.__system.cpu.a = value & 0xFF
         # Determine carry
-        if system.cpu.flags.isset(_CPUFlags.DECIMAL):
+        if self.__system.cpu.flags.isset(emu.CPUFlags.DECIMAL):
             carry = value > 99
         else:
             carry = value > 0xFF
         # Update flags
-        system.cpu.flags = system.cpu.flags.set_multi((\
-            (_CPUFlags.CARRY, carry),\
-            (_CPUFlags.OVERFLOW, (old & 0x80) != (system.cpu.a & 0x80))))
-        cls.__update_nz(system, system.cpu.a)
+        self.__system.cpu.flags = self.__system.cpu.flags.set_multi((\
+            (emu.CPUFlags.CARRY, carry),\
+            (emu.CPUFlags.OVERFLOW, (old & 0x80) != (self.__system.cpu.a & 0x80))))
+        self.__update_nz(self.__system.cpu.a)
     
-    @classmethod
-    def ins_CMP(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        value = system.cpu.a - cls.__get_value(system, addr, ins)
-        system.cpu.flags = system.cpu.flags.set(_CPUFlags.CARRY, value >= 0)
-        cls.__update_nz(system, value)
+    def __ins_CMP(self, ins:Instruction):
+        value = self.__system.cpu.a - self.__get_value(self.__system, ins)
+        self.__system.cpu.flags = self.__system.cpu.flags.set(emu.CPUFlags.CARRY, value >= 0)
+        self.__update_nz(value)
     
-    @classmethod
-    def ins_CPX(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        value = system.cpu.x - cls.__get_value(system, addr, ins)
-        system.cpu.flags = system.cpu.flags.set(_CPUFlags.CARRY, value >= 0)
-        cls.__update_nz(system, value)
+    def __ins_CPX(self, ins:Instruction):
+        value = self.__system.cpu.x - self.__get_value(self.__system, ins)
+        self.__system.cpu.flags = self.__system.cpu.flags.set(emu.CPUFlags.CARRY, value >= 0)
+        self.__update_nz(value)
     
-    @classmethod
-    def ins_CPY(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        value = system.cpu.y - cls.__get_value(system, addr, ins)
-        system.cpu.flags = system.cpu.flags.set(_CPUFlags.CARRY, value >= 0)
-        cls.__update_nz(system, value)
+    def __ins_CPY(self, ins:Instruction):
+        value = self.__system.cpu.y - self.__get_value(self.__system, ins)
+        self.__system.cpu.flags = self.__system.cpu.flags.set(emu.CPUFlags.CARRY, value >= 0)
+        self.__update_nz(value)
     
-    @classmethod
-    def ins_SBC(cls, system:_System, addr:int, ins:assutil.AsmIns):
+    def __ins_SBC(self, ins:Instruction):
         # TODO: Ensure calculations are correct
-        value = system.cpu.a - cls.__get_value(system, addr, ins) -\
-            (0 if system.cpu.flags.isset(_CPUFlags.CARRY) else 1)
-        old = system.cpu.a
-        system.cpu.a = (0x100 + value) & 0xFF
+        value = self.__system.cpu.a - self.__get_value(self.__system, ins) -\
+            (0 if self.__system.cpu.flags.isset(emu.CPUFlags.CARRY) else 1)
+        old = self.__system.cpu.a
+        self.__system.cpu.a = (0x100 + value) & 0xFF
         # Update flags
-        system.cpu.flags = system.cpu.flags.set_multi((\
-            (_CPUFlags.CARRY, value >= 0 ),\
-            (_CPUFlags.OVERFLOW, (old & 0x80) != (system.cpu.a & 0x80))))
-        cls.__update_nz(system, system.cpu.a)
+        self.__system.cpu.flags = self.__system.cpu.flags.set_multi((\
+            (emu.CPUFlags.CARRY, value >= 0 ),\
+            (emu.CPUFlags.OVERFLOW, (old & 0x80) != (self.__system.cpu.a & 0x80))))
+        self.__update_nz(self.__system.cpu.a)
     
     #endregion
 
     #region increment/decrement
 
-    @classmethod
-    def ins_DEC(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        value = (cls.__get_value(system, addr, ins) + 0xFF) & 0xFF
-        cls.__set_value(system, addr, ins, value)
-        cls.__update_nz(system, value)
+    def __ins_DEC(self, ins:Instruction):
+        value = (self.__get_value(self.__system, ins) + 0xFF) & 0xFF
+        self.__set_value(ins, value)
+        self.__update_nz(value)
 
-    @classmethod
-    def ins_DEX(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        system.cpu.x = (system.cpu.x + 0xFF) & 0xFF
-        cls.__update_nz(system, system.cpu.x)
+    def __ins_DEX(self, ins:Instruction):
+        self.__system.cpu.x = (self.__system.cpu.x + 0xFF) & 0xFF
+        self.__update_nz(self.__system.cpu.x)
         
-    @classmethod
-    def ins_DEY(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        system.cpu.y = (system.cpu.y + 0xFF) & 0xFF
-        cls.__update_nz(system, system.cpu.y)
+    def __ins_DEY(self, ins:Instruction):
+        self.__system.cpu.y = (self.__system.cpu.y + 0xFF) & 0xFF
+        self.__update_nz(self.__system.cpu.y)
     
-    @classmethod
-    def ins_INC(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        value = (cls.__get_value(system, addr, ins) + 1) & 0xFF
-        cls.__set_value(system, addr, ins, value)
-        cls.__update_nz(system, value)
+    def __ins_INC(self, ins:Instruction):
+        value = (self.__get_value(self.__system, ins) + 1) & 0xFF
+        self.__set_value(ins, value)
+        self.__update_nz(value)
 
-    @classmethod
-    def ins_INX(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        system.cpu.x = (system.cpu.x + 1) & 0xFF
-        cls.__update_nz(system, system.cpu.x)
+    def __ins_INX(self, ins:Instruction):
+        self.__system.cpu.x = (self.__system.cpu.x + 1) & 0xFF
+        self.__update_nz(self.__system.cpu.x)
         
-    @classmethod
-    def ins_INY(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        system.cpu.y = (system.cpu.y + 1) & 0xFF
-        cls.__update_nz(system, system.cpu.y)
+    def __ins_INY(self, ins:Instruction):
+        self.__system.cpu.y = (self.__system.cpu.y + 1) & 0xFF
+        self.__update_nz(self.__system.cpu.y)
     
     #endregion
 
     #region control
 
-    @classmethod
-    def ins_BRK(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        raise cliutil.CommandError("BRK is not yet supported")
+    def __ins_BRK(self, ins:Instruction):
+        # Push return position onto stack
+        pos = self.__system.memory.pos + 1
+        self.__system.cpu.stack.push((pos & 0xFF00) >> 8)
+        self.__system.cpu.stack.push(pos & 0x00FF)
+        # Push flags onto stack
+        self.__system.cpu.stack.push(self.__system.cpu.flags.value)
+        # Disable interrupts
+        self.__system.cpu.flags.set(emu.CPUFlags.INTDIS, True)
+        # Goto break point
+        self.__system.memory.goto(self.__system.memory.ptr_break)
 
-    @classmethod
-    def ins_JMP(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        if ins.type.mode.mode == assutil.AsmInsAddrMode.ABSOLUTE_INDIRECT:
-            raise cliutil.CommandError("JMP ($nnnn) is not yet supported")
-        system.memory.goto(ins.type.mode.absaddr(addr, ins.input))
+    def __ins_JMP(self, ins:Instruction):
+        if ins.ins.type.mode.mode == assutil.AsmInsAddrMode.ABSOLUTE_INDIRECT:
+            raise emu.EmuError("JMP ($nnnn) is not yet supported")
+        self.__system.memory.goto(ins.ins.type.mode.absaddr(ins.addr, ins.ins.input))
 
-    @classmethod
-    def ins_JSR(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        system.cpu.stack.push((system.memory.pos & 0xFF00) >> 8)
-        system.cpu.stack.push(system.memory.pos & 0x00FF)
-        system.memory.goto(ins.type.mode.absaddr(addr, ins.input))
+    def __ins_JSR(self, ins:Instruction):
+        self.__system.cpu.stack.push((self.__system.memory.pos & 0xFF00) >> 8)
+        self.__system.cpu.stack.push(self.__system.memory.pos & 0x00FF)
+        self.__system.memory.goto(ins.ins.type.mode.absaddr(ins.addr, ins.ins.input))
 
-    @classmethod
-    def ins_RTI(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        raise cliutil.CommandError("RTI is not yet supported")
+    def __ins_RTI(self, ins:Instruction):
+        # Restore flags
+        self.__system.cpu.flags = emu.CPUFlags(self.__system.cpu.stack.pull())
+        # Restore position
+        dest_lo = self.__system.cpu.stack.pull()
+        dest_hi = self.__system.cpu.stack.pull()
+        self.__system.memory.goto((dest_hi << 8) | dest_lo)
 
-    @classmethod
-    def ins_RTS(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        dest_lo = system.cpu.stack.pull()
-        dest_hi = system.cpu.stack.pull()
-        system.memory.goto((dest_hi << 8) | dest_lo)
+    def __ins_RTS(self, ins:Instruction):
+        dest_lo = self.__system.cpu.stack.pull()
+        dest_hi = self.__system.cpu.stack.pull()
+        self.__system.memory.goto((dest_hi << 8) | dest_lo)
     
     #endregion
     
     #region branch
 
-    @classmethod
-    def ins_BCC(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        if system.cpu.flags.isset(_CPUFlags.CARRY): return
-        system.memory.goto(ins.type.mode.absaddr(addr, ins.input))
+    def __ins_BCC(self, ins:Instruction):
+        if self.__system.cpu.flags.isset(emu.CPUFlags.CARRY): return
+        self.__system.memory.goto(ins.ins.type.mode.absaddr(ins.addr, ins.ins.input))
 
-    @classmethod
-    def ins_BCS(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        if not system.cpu.flags.isset(_CPUFlags.CARRY): return
-        system.memory.goto(ins.type.mode.absaddr(addr, ins.input))
+    def __ins_BCS(self, ins:Instruction):
+        if not self.__system.cpu.flags.isset(emu.CPUFlags.CARRY): return
+        self.__system.memory.goto(ins.ins.type.mode.absaddr(ins.addr, ins.ins.input))
 
-    @classmethod
-    def ins_BEQ(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        if not system.cpu.flags.isset(_CPUFlags.ZERO): return
-        system.memory.goto(ins.type.mode.absaddr(addr, ins.input))
+    def __ins_BEQ(self, ins:Instruction):
+        if not self.__system.cpu.flags.isset(emu.CPUFlags.ZERO): return
+        self.__system.memory.goto(ins.ins.type.mode.absaddr(ins.addr, ins.ins.input))
 
-    @classmethod
-    def ins_BMI(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        if not system.cpu.flags.isset(_CPUFlags.NEGATIVE): return
-        system.memory.goto(ins.type.mode.absaddr(addr, ins.input))
+    def __ins_BMI(self, ins:Instruction):
+        if not self.__system.cpu.flags.isset(emu.CPUFlags.NEGATIVE): return
+        self.__system.memory.goto(ins.ins.type.mode.absaddr(ins.addr, ins.ins.input))
 
-    @classmethod
-    def ins_BNE(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        if system.cpu.flags.isset(_CPUFlags.ZERO): return
-        system.memory.goto(ins.type.mode.absaddr(addr, ins.input))
+    def __ins_BNE(self, ins:Instruction):
+        if self.__system.cpu.flags.isset(emu.CPUFlags.ZERO): return
+        self.__system.memory.goto(ins.ins.type.mode.absaddr(ins.addr, ins.ins.input))
 
-    @classmethod
-    def ins_BPL(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        if system.cpu.flags.isset(_CPUFlags.NEGATIVE): return
-        system.memory.goto(ins.type.mode.absaddr(addr, ins.input))
+    def __ins_BPL(self, ins:Instruction):
+        if self.__system.cpu.flags.isset(emu.CPUFlags.NEGATIVE): return
+        self.__system.memory.goto(ins.ins.type.mode.absaddr(ins.addr, ins.ins.input))
 
-    @classmethod
-    def ins_BVC(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        if system.cpu.flags.isset(_CPUFlags.OVERFLOW): return
-        system.memory.goto(ins.type.mode.absaddr(addr, ins.input))
+    def __ins_BVC(self, ins:Instruction):
+        if self.__system.cpu.flags.isset(emu.CPUFlags.OVERFLOW): return
+        self.__system.memory.goto(ins.ins.type.mode.absaddr(ins.addr, ins.ins.input))
 
-    @classmethod
-    def ins_BVS(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        if not system.cpu.flags.isset(_CPUFlags.OVERFLOW): return
-        system.memory.goto(ins.type.mode.absaddr(addr, ins.input))
+    def __ins_BVS(self, ins:Instruction):
+        if not self.__system.cpu.flags.isset(emu.CPUFlags.OVERFLOW): return
+        self.__system.memory.goto(ins.ins.type.mode.absaddr(ins.addr, ins.ins.input))
 
     #endregion
 
     #region flags
     
-    @classmethod
-    def ins_CLC(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        system.cpu.flags.set(_CPUFlags.CARRY, False)
+    def __ins_CLC(self, ins:Instruction):
+        self.__system.cpu.flags.set(emu.CPUFlags.CARRY, False)
     
-    @classmethod
-    def ins_CLD(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        system.cpu.flags.set(_CPUFlags.DECIMAL, False)
+    def __ins_CLD(self, ins:Instruction):
+        self.__system.cpu.flags.set(emu.CPUFlags.DECIMAL, False)
     
-    @classmethod
-    def ins_CLI(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        system.cpu.flags.set(_CPUFlags.INTDIS, False)
+    def __ins_CLI(self, ins:Instruction):
+        self.__system.cpu.flags.set(emu.CPUFlags.INTDIS, False)
     
-    @classmethod
-    def ins_CLV(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        system.cpu.flags.set(_CPUFlags.OVERFLOW, False)
+    def __ins_CLV(self, ins:Instruction):
+        self.__system.cpu.flags.set(emu.CPUFlags.OVERFLOW, False)
     
-    @classmethod
-    def ins_SEC(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        system.cpu.flags.set(_CPUFlags.CARRY, True)
+    def __ins_SEC(self, ins:Instruction):
+        self.__system.cpu.flags.set(emu.CPUFlags.CARRY, True)
     
-    @classmethod
-    def ins_SED(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        system.cpu.flags.set(_CPUFlags.DECIMAL, True)
+    def __ins_SED(self, ins:Instruction):
+        self.__system.cpu.flags.set(emu.CPUFlags.DECIMAL, True)
     
-    @classmethod
-    def ins_SEI(cls, system:_System, addr:int, ins:assutil.AsmIns):
-        system.cpu.flags.set(_CPUFlags.INTDIS, True)
+    def __ins_SEI(self, ins:Instruction):
+        self.__system.cpu.flags.set(emu.CPUFlags.INTDIS, True)
 
     #endregion
 
     #region nop
     
-    @classmethod
-    def ins_NOP(cls, system:_System, addr:int, ins:assutil.AsmIns):
+    def __ins_NOP(self, ins:Instruction):
         pass
 
     #endregion
 
     #endregion
-
-_INSFUNCS = InsFunc.get()
 
 #endregion
 
@@ -765,115 +522,122 @@ class command(cli.CLICommand):
 
     #endregion
 
-    #region helper methods
+    #region init
 
-    @classmethod
-    def __get_dest_addr(cls, ins_addr:int, ins:assutil.AsmIns):
-        return ins.type.mode.absaddr(ins_addr, ins.input)
-    
-    @classmethod
-    def __ins_input(cls, ins:assutil.AsmIns, input:str):
-        # Prefix
-        beg = 0
-        while beg < len(ins.type.syntax):
-            if ins.type.syntax[beg] == '$': break
-            beg += 1
-        if beg == len(ins.type.syntax): return ins.type.syntax
-        # Suffix
-        end = beg + 1
-        while end < len(ins.type.syntax):
-            if ins.type.syntax[end].lower() != 'n': break
-            end += 1
-        return ins.type.syntax[:beg] + input + ins.type.syntax[end:]
+    def __init__(self):
+        super().__init__()
+        self.__time_alive = 0
+
+    #endregion
+
+    #region const
+
+    __DELAY = 0.001
+
+    #endregion
+
+    #region receivers
+
+    def __postdraw(self, args:boacon.BCPostDrawArgs):
+        # args.win.addstr(0, 1, f"{self.__time_alive:.2f} sec")
+        pass
+
+    def __on_init(self):
+        boacon.postdraw().connect(self.__postdraw)
+
+    def __on_final(self):
+        boacon.postdraw().disconnect(self.__postdraw)
 
     #endregion
 
     #region methods
 
     def _main(self):
+        rom = cast(Path, self.rom) # type: ignore
+        nogarb = cast(bool, self.nogarb) # type: ignore
+        stackwrap = cast(bool, self.stackwrap) # type: ignore
         try:
-            curses.wrapper(self.__main)
+            # Load ROM
+            rom_data = cliutil.FileUtil.read_all_bytes(rom)
+            if len(rom_data) < assutil.ROM_SIZE: raise cliutil.CommandError(\
+                f"ROM must have a size of {assutil.ROM_SIZE} bytes.")
+            # Run boacon
+            boacon.on_init().connect(self.__on_init)
+            boacon.on_final().connect(self.__on_final)
+            boacon.init()
+            try:
+                # General console
+                gencon = boacon.BCConsolePane()
+                gencon.x.dis0 = 1
+                gencon.x.len = 30
+                gencon.y.dis1 = 1
+                gencon.y.len = 10
+                boacon.panes().append(gencon)
+                # History console
+                history = boacon.BCConsolePane()
+                history.x.dis0 = 32
+                history.x.dis1 = 1
+                history.y.dis1 = 1
+                history.y.len = 10
+                boacon.panes().append(history)
+                # Warn user if ROM requires bank switching
+                if len(rom_data) > assutil.ROM_SIZE: gencon.print(\
+                    "ROMs with bank switching are not supported.")
+                # Create program
+                program = Program(rom_data[:assutil.ROM_SIZE], nogarb, stackwrap)
+                def program_step():
+                    nonlocal gencon, history, program
+                    if program.error is not None: return
+                    # Get system info
+                    _sys_pos = program.system.memory.pos
+                    _sys_flags = program.system.cpu.flags.value
+                    _sys_a = program.system.cpu.a
+                    _sys_x = program.system.cpu.x
+                    _sys_y = program.system.cpu.y
+                    # Step thru program
+                    program.step()
+                    # Did an error occur?
+                    if program.error is not None:
+                        gencon.print(program.error)
+                        return
+                    # No!
+                    assert program.previous is not None
+                    with StringIO() as _s:
+                        _s.write(f"${_sys_pos:04X}")
+                        _s.write(f"    ${program.previous.ins.gen_str(program.previous.addr):<15}")
+                        _s.write(f" {_sys_flags:08b}")
+                        _s.write(f" ${_sys_a:02X}")
+                        _s.write(f" ${_sys_x:02X}")
+                        _s.write(f" ${_sys_y:02X}")
+                        _s.write(f" ->")
+                        _s.write(f" {program.system.cpu.flags.value:08b}")
+                        _s.write(f" ${program.system.cpu.a:02X}")
+                        _s.write(f" ${program.system.cpu.x:02X}")
+                        _s.write(f" ${program.system.cpu.y:02X}")
+                        history.print(_s.getvalue())
+                # Run thru program
+                gencon.print("Press Space to Step")
+                gencon.print("Press Esc to Quit")
+                while True:
+                    # Check input
+                    ch = boacon.getch()
+                    if ch == 0x1B: break
+                    if ch == 0x20: program_step()
+                    # Refresh
+                    boacon.refresh()
+                    time.sleep(self.__DELAY)
+            except emu.EmuError as _e:
+                raise cliutil.CommandError(_e)
+            finally:
+                boacon.final()
+
+            # Success!!!
             return 0
         except cliutil.CommandError as _e:
             print("ERROR", file = sys.stderr)
             print(_e, file = sys.stderr)
             return 1
         
-    def __main(self, stdscr):
-        FIXED_W = 80
-        FIXED_H = 25
-        rom = cast(Path, self.rom) # type: ignore
-        # Enable non-blocking input mode
-        stdscr.nodelay(True)
-        # Enable the keypad to capture special keys like KEY_RESIZE
-        stdscr.keypad(True)
-        # Clear old structures and sync curses internal tracking
-        stdscr.clear()
-        curses.resizeterm(FIXED_H, FIXED_W)
-        # Read ROM
-        VECTOR = assutil.ROM_VECTOR - assutil.ROM_BEG
-        addr_nmi = 0
-        addr_entry = 0
-        addr_break = 0
-        system = _System(self)
-        resize_timer = 0
-        with cliutil.FileUtil.open_rb(rom) as _f:
-            # Check size
-            size = help.IOUtil.get_size(_f)
-            if size < assutil.ROM_SIZE: raise cliutil.CommandError(\
-                f"ROM must have a size of {assutil.ROM_SIZE} bytes.")
-            if size > assutil.ROM_SIZE: print(\
-                "ROMs with bank switching are not supported.")
-            # NMI, entry, break
-            _f.seek(VECTOR)
-            addr_nmi:int = struct.unpack('<H', _f.read(2))[0]
-            addr_entry:int = struct.unpack('<H', _f.read(2))[0]
-            addr_break:int = struct.unpack('<H', _f.read(2))[0]
-            if addr_entry < assutil.ROM_BEG: raise cliutil.CommandError(\
-                f"Entry-point address ${addr_entry:04X} is out of range.")
-            # Create memory
-            _f.seek(0)
-            system.memory.populate(assutil.ROM_BEG, _f.read(VECTOR))
-        # Begin execution
-        system.memory.goto(addr_entry)
-        while True:
-            _pos = system.memory.pos
-            # Read opcode
-            _ins_opcode =  system.memory.read_8()
-            # Get instruction type
-            if not (_ins_opcode in assutil.ASMINSTYPES):
-                raise cliutil.CommandError(f"${_pos:04X}: Invalid opcode ${_ins_opcode:02X}")
-            _ins_type = assutil.ASMINSTYPES[_ins_opcode]
-            # Read instruction
-            _ins_data = bytes([_ins_opcode]) + system.memory.read(max(0, _ins_type.mode.size - 1))
-            _ins = assutil.AsmIns(data = _ins_data)
-            # Perform instruction
-            _INSFUNCS[_ins.type.prefix.name](system, _pos, _ins)
-            # Should we stop?
-            if system.stop: break
-            # Test
-            for _i in range(128, 256, 16):
-                with StringIO() as _s:
-                    for _j in range(_i, _i + 16):
-                        _s.write(f" {system.memory[_j]:02X}")
-                    stdscr.addstr((_i - 128) // 16, 0, _s.getvalue())
-            # Fix window size
-            if resize_timer > 0:
-                resize_timer -= 1
-                if resize_timer == 0:
-                    stdscr.clear()
-                    curses.resizeterm(FIXED_H, FIXED_W)
-            # Read curses
-            key = stdscr.getch()
-            # Quit?
-            if key == ord('q'): break
-            # Was terminal window resized?
-            elif key == curses.KEY_RESIZE: resize_timer = 100
-            # Redraw
-            stdscr.refresh()
-            # Brief sleep
-            time.sleep(0.01)
-
     #endregion
 
 if __name__ == '__main__':

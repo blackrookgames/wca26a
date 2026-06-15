@@ -213,7 +213,7 @@ ADDR_NMI = 0xFFFA
 ADDR_ENTRY = 0xFFFC
 """ Cart Entry Vector (16bit pointer) """
 
-ADDR_BREAK = 0xFFFC
+ADDR_BREAK = 0xFFFE
 """ Cart Break Vector (16bit pointer) """
 
 #endregion
