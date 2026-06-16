@@ -17,8 +17,8 @@ class System:
         :param nogarb: If true, initial garbage data will not be emulated
         :param stackwrap: If true, stack pointer will wrap upon overflow/underflow; otherwise an EmuError is raised
         """
-        self.__cpu = _CPU(not nogarb, stackwrap)
-        self.__memory = _Memory(not nogarb)
+        self.__cpu = _CPU(nogarb, stackwrap)
+        self.__memory = _Memory(nogarb)
 
     #endregion
 

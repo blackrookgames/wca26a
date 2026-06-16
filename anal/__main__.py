@@ -21,6 +21,7 @@ import cliutil
 import col
 
 import emu
+import panes
 
 #region Instruction
 
@@ -566,6 +567,44 @@ class command(cli.CLICommand):
             boacon.on_final().connect(self.__on_final)
             boacon.init()
             try:
+                # Create program
+                program = Program(rom_data[:assutil.ROM_SIZE], nogarb, stackwrap)
+                def program_step():
+                    nonlocal program
+                    nonlocal gencon, view_history, view_stack, view_status
+                    if program.error is not None: return
+                    # Get system info
+                    _sys_pos = program.system.memory.pos
+                    _sys_flags = program.system.cpu.flags
+                    _sys_a = program.system.cpu.a
+                    _sys_x = program.system.cpu.x
+                    _sys_y = program.system.cpu.y
+                    # Step thru program
+                    program.step()
+                    # Did everything go okay?
+                    if program.error is None:
+                        # Update history view
+                        assert program.previous is not None
+                        view_history.log(panes.InsHisViewEntry(\
+                            program.previous.addr, program.previous.ins,\
+                            panes.InsHisViewEntryRegState(\
+                                _sys_a,\
+                                _sys_x,\
+                                _sys_y,\
+                                _sys_flags),\
+                            panes.InsHisViewEntryRegState(\
+                                program.system.cpu.a,\
+                                program.system.cpu.x,\
+                                program.system.cpu.y,\
+                                program.system.cpu.flags)\
+                            ))
+                        # Update stack view
+                        view_stack.refresh()
+                        # Update status view
+                        view_status.refresh()
+                    # No! An error occurred!
+                    else:
+                        gencon.print(program.error)
                 # General console
                 gencon = boacon.BCConsolePane()
                 gencon.x.dis0 = 1
@@ -573,48 +612,30 @@ class command(cli.CLICommand):
                 gencon.y.dis1 = 1
                 gencon.y.len = 10
                 boacon.panes().append(gencon)
-                # History console
-                history = boacon.BCConsolePane()
-                history.x.dis0 = 32
-                history.x.dis1 = 1
-                history.y.dis1 = 1
-                history.y.len = 10
-                boacon.panes().append(history)
+                # History view
+                view_history = panes.InsHisView()
+                view_history.x.dis0 = 32
+                view_history.x.dis1 = 1
+                view_history.y.dis1 = 1
+                view_history.y.len = 10
+                boacon.panes().append(view_history)
+                # Stack view
+                view_stack = panes.StackView(program.system.cpu.stack)
+                view_stack.x.dis0 = 1
+                view_stack.x.len = 9
+                view_stack.y.dis0 = 1
+                view_stack.y.dis1 = 12
+                boacon.panes().append(view_stack)
+                # Status view
+                view_status = panes.StatusView(program.system)
+                view_status.x.dis0 = 11
+                view_status.x.len = 9
+                view_status.y.dis0 = 1
+                view_status.y.dis1 = 12
+                boacon.panes().append(view_status)
                 # Warn user if ROM requires bank switching
                 if len(rom_data) > assutil.ROM_SIZE: gencon.print(\
                     "ROMs with bank switching are not supported.")
-                # Create program
-                program = Program(rom_data[:assutil.ROM_SIZE], nogarb, stackwrap)
-                def program_step():
-                    nonlocal gencon, history, program
-                    if program.error is not None: return
-                    # Get system info
-                    _sys_pos = program.system.memory.pos
-                    _sys_flags = program.system.cpu.flags.value
-                    _sys_a = program.system.cpu.a
-                    _sys_x = program.system.cpu.x
-                    _sys_y = program.system.cpu.y
-                    # Step thru program
-                    program.step()
-                    # Did an error occur?
-                    if program.error is not None:
-                        gencon.print(program.error)
-                        return
-                    # No!
-                    assert program.previous is not None
-                    with StringIO() as _s:
-                        _s.write(f"${_sys_pos:04X}")
-                        _s.write(f"    ${program.previous.ins.gen_str(program.previous.addr):<15}")
-                        _s.write(f" {_sys_flags:08b}")
-                        _s.write(f" ${_sys_a:02X}")
-                        _s.write(f" ${_sys_x:02X}")
-                        _s.write(f" ${_sys_y:02X}")
-                        _s.write(f" ->")
-                        _s.write(f" {program.system.cpu.flags.value:08b}")
-                        _s.write(f" ${program.system.cpu.a:02X}")
-                        _s.write(f" ${program.system.cpu.x:02X}")
-                        _s.write(f" ${program.system.cpu.y:02X}")
-                        history.print(_s.getvalue())
                 # Run thru program
                 gencon.print("Press Space to Step")
                 gencon.print("Press Esc to Quit")
