@@ -1,4 +1,6 @@
 import sys
+
+from curses import KEY_PPAGE, KEY_NPAGE, KEY_F1, KEY_F5
 from pathlib import Path
 
 SRC_FILE = Path(__file__).resolve()
@@ -7,6 +9,7 @@ PRJ_DIR = SRC_DIR.parent
 sys.path.insert(0, str(PRJ_DIR.joinpath("engine")))
 
 import boacon
+import random
 import sys
 import time
 
@@ -22,6 +25,66 @@ import col
 
 import emu
 import panes
+
+#region Help
+
+class Help(panes.SurfacePaneBase):
+    """ Represents a help pane """
+
+    #region const
+
+    __LINES = (\
+        "",\
+        "  Help",\
+        "",\
+        "  F1           Show help  ",\
+        "  F5           Reset  ",\
+        "  Enter        Play/Pause  ",\
+        "  Space        Step  ",\
+        "  Page Up      Memory Prev Page  ",\
+        "  Page Down    Memory Next Page  ",\
+        "  Esc          Quit  ",\
+        "")
+
+    #endregion
+
+    #region init
+
+    def __init__(self):
+        """ Initializer for Help """
+        super().__init__()
+        # Compute ideal size
+        self.__ideal_width = 0
+        for _line in self.__LINES:
+            if self.__ideal_width >= len(_line): continue
+            self.__ideal_width = len(_line)
+        self.__ideal_height = len(self.__LINES)
+        # Create surface
+        self._surface.resize(self.__ideal_width, self.__ideal_height)
+        for _i in range(self.__ideal_height):
+            _line = self.__LINES[_i]
+            _pos = _i * self.__ideal_width
+            for _c in _line:
+                self._surface[_pos] = boacon.BCChar(ord(_c))
+                _pos += 1
+
+    #endregion
+
+    #region properties
+
+    @property
+    def ideal_width(self):
+        """ Ideal width """
+        return self.__ideal_width
+
+    @property
+    def ideal_height(self):
+        """ Ideal height """
+        return self.__ideal_height
+
+    #endregion
+
+#endregion
 
 #region Instruction
 
@@ -54,17 +117,14 @@ class Program:
         if len(rom): ValueError(f"rom must have a length of {assutil.ROM_SIZE}")
         self.__instructions = self.__get_instructions()
         self.__rom = rom
-        self.__nogarb = nogarb
-        self.__stackwrap = stackwrap
-        self.reset()
+        self.__system = emu.System(nogarb, stackwrap)
+        self.__reset_rom()
 
     #endregion
 
     #region fields
 
     __rom:bytes
-    __nogarb:bool
-    __stackwrap:bool
 
     __system:emu.System
     __error:None|str
@@ -91,18 +151,24 @@ class Program:
 
     #endregion
 
-    #region methods
+    #region helper methods
 
-    def reset(self):
-        """ Resets the program """
-        # Recreate system
-        self.__system = emu.System(self.__nogarb, self.__stackwrap)
+    def __reset_rom(self):
         # Add ROM
         self.__system.memory.populate(assutil.ROM_BEG, self.__rom)
         # Goto entry point
         self.__system.memory.goto(self.__system.memory.ptr_entry)
         # Reset error state
         self.__error = None
+
+    #endregion
+
+    #region methods
+
+    def reset(self):
+        """ Resets the program """
+        self.__system.reset()
+        self.__reset_rom()
 
     def step(self):
         """
@@ -148,21 +214,41 @@ class Program:
 
     #region helper
 
-    @classmethod
-    def __get_value(cls, system:emu.System, ins:Instruction):
+    def __pointed(self, ins:Instruction):
+        def absind(pntref):
+            nonlocal self
+            lo = pntref
+            hi = (pntref + 1) & 0xFF # Emulate page bug
+            return (hi << 8) | lo
+        if not ins.ins.type.mode.input_is_addr:
+            return 0
+        if ins.ins.type.mode.mode == assutil.AsmInsAddrMode.X_INDEXED_ABSOLUTE:
+            return (ins.ins.input + self.__system.cpu.x) & 0xFFFF
+        if ins.ins.type.mode.mode == assutil.AsmInsAddrMode.X_INDEXED_ZERO_PAGE:
+            return (ins.ins.input + self.__system.cpu.x) & 0xFF # Do not cross page boundaries
+        if ins.ins.type.mode.mode == assutil.AsmInsAddrMode.Y_INDEXED_ABSOLUTE:
+            return (ins.ins.input + self.__system.cpu.y) & 0xFFFF
+        if ins.ins.type.mode.mode == assutil.AsmInsAddrMode.Y_INDEXED_ZERO_PAGE:
+            return (ins.ins.input + self.__system.cpu.y) & 0xFF # Do not cross page boundaries
+        if ins.ins.type.mode.mode == assutil.AsmInsAddrMode.ABSOLUTE_INDIRECT:
+            return absind(ins.ins.input)
+        if ins.ins.type.mode.mode == assutil.AsmInsAddrMode.X_INDEXED_ZERO_PAGE_INDIRECT:
+            return absind((ins.ins.input + self.__system.cpu.x) & 0xFF) # Do not cross page boundaries
+        if ins.ins.type.mode.mode == assutil.AsmInsAddrMode.ZERO_PAGE_INDIRECT_Y_INDEXED:
+            return (absind(ins.ins.input) + self.__system.cpu.y) & 0xFFFF
+        return ins.ins.type.mode.absaddr(ins.addr, ins.ins.input)
+
+    def __get_value(self, ins:Instruction):
         if ins.ins.type.mode.mode == assutil.AsmInsAddrMode.ACCUMULATOR:
-            return system.cpu.a
+            return self.__system.cpu.a
         if ins.ins.type.mode.mode == assutil.AsmInsAddrMode.IMMEDIATE:
             return ins.ins.input
-        if ins.ins.type.mode.input_is_addr:
-            return system.memory[ins.ins.type.mode.absaddr(ins.addr, ins.ins.input)]
-        return 0
+        return self.__system.memory[self.__pointed(ins)]
 
     def __set_value(self, ins:Instruction, value:int):
         if ins.ins.type.mode.mode == assutil.AsmInsAddrMode.ACCUMULATOR:
             self.__system.cpu.a = value
-        elif ins.ins.type.mode.input_is_addr:
-            self.__system.memory[ins.ins.type.mode.absaddr(ins.addr, ins.ins.input)] = value
+        self.__system.memory[self.__pointed(ins)] = value
     
     def __update_nz(self, value:int):
         self.__system.cpu.flags = self.__system.cpu.flags.set_multi((\
@@ -179,29 +265,29 @@ class Program:
     #region load/store
     
     def __ins_LDA(self, ins:Instruction):
-        self.__system.cpu.a = self.__get_value(self.__system, ins)
+        self.__system.cpu.a = self.__get_value(ins)
         self.__update_nz(self.__system.cpu.a)
 
     def __ins_LDX(self, ins:Instruction):
-        self.__system.cpu.x = self.__get_value(self.__system, ins)
+        self.__system.cpu.x = self.__get_value(ins)
         self.__update_nz(self.__system.cpu.x)
 
     def __ins_LDY(self, ins:Instruction):
-        self.__system.cpu.y = self.__get_value(self.__system, ins)
+        self.__system.cpu.y = self.__get_value(ins)
         self.__update_nz(self.__system.cpu.y)
     
     def __ins_STA(self, ins:Instruction):
-        dest = ins.ins.type.mode.absaddr(ins.addr, ins.ins.input)
+        dest = self.__pointed(ins)
         self.__system.memory[dest] = self.__system.cpu.a
         self.__print_if_peek(dest)
     
     def __ins_STX(self, ins:Instruction):
-        dest = ins.ins.type.mode.absaddr(ins.addr, ins.ins.input)
+        dest = self.__pointed(ins)
         self.__system.memory[dest] = self.__system.cpu.x
         self.__print_if_peek(dest)
     
     def __ins_STY(self, ins:Instruction):
-        dest = ins.ins.type.mode.absaddr(ins.addr, ins.ins.input)
+        dest = self.__pointed(ins)
         self.__system.memory[dest] = self.__system.cpu.y
         self.__print_if_peek(dest)
 
@@ -254,28 +340,28 @@ class Program:
     #region bit-shift
     
     def __ins_ASL(self, ins:Instruction):
-        old = self.__get_value(self.__system, ins)
+        old = self.__get_value(ins)
         new = (old << 1) & 0xFF
         self.__set_value(ins, new)
         self.__update_nz(new)
         self.__system.cpu.flags = self.__system.cpu.flags.set(emu.CPUFlags.CARRY, (old & 0x80) != 0)
     
     def __ins_LSR(self, ins:Instruction):
-        old = self.__get_value(self.__system, ins)
+        old = self.__get_value(ins)
         new = old >> 1
         self.__set_value(ins, new)
         self.__update_nz(new)
         self.__system.cpu.flags = self.__system.cpu.flags.set(emu.CPUFlags.CARRY, (old & 0x01) != 0)
     
     def __ins_ROL(self, ins:Instruction):
-        old = self.__get_value(self.__system, ins)
+        old = self.__get_value(ins)
         new = ((old << 1) & 0xFF) | (0x01 if self.__system.cpu.flags.isset(emu.CPUFlags.CARRY) else 0x00)
         self.__set_value(ins, new)
         self.__update_nz(new)
         self.__system.cpu.flags = self.__system.cpu.flags.set(emu.CPUFlags.CARRY, (old & 0x80) != 0)
     
     def __ins_ROR(self, ins:Instruction):
-        old = self.__get_value(self.__system, ins)
+        old = self.__get_value(ins)
         new = (old >> 1) | (0x80 if self.__system.cpu.flags.isset(emu.CPUFlags.CARRY) else 0x00)
         self.__set_value(ins, new)
         self.__update_nz(new)
@@ -286,22 +372,22 @@ class Program:
     #region logic
 
     def __ins_AND(self, ins:Instruction):
-        self.__system.cpu.a &= self.__get_value(self.__system, ins)
+        self.__system.cpu.a &= self.__get_value(ins)
         self.__update_nz(self.__system.cpu.a)
     
     def __ins_BIT(self, ins:Instruction):
-        value = self.__get_value(self.__system, ins)
+        value = self.__get_value(ins)
         self.__system.cpu.flags = self.__system.cpu.flags.set_multi((\
             (emu.CPUFlags.NEGATIVE, (value & 0b10000000) != 0),\
             (emu.CPUFlags.OVERFLOW, (value & 0b01000000) != 0),\
             (emu.CPUFlags.ZERO, (self.__system.cpu.a & value) == 0),))
     
     def __ins_EOR(self, ins:Instruction):
-        self.__system.cpu.a ^= self.__get_value(self.__system, ins)
+        self.__system.cpu.a ^= self.__get_value(ins)
         self.__update_nz(self.__system.cpu.a)
     
     def __ins_ORA(self, ins:Instruction):
-        self.__system.cpu.a |= self.__get_value(self.__system, ins)
+        self.__system.cpu.a |= self.__get_value(ins)
         self.__update_nz(self.__system.cpu.a)
     
     #endregion
@@ -310,7 +396,7 @@ class Program:
 
     def __ins_ADC(self, ins:Instruction):
         # TODO: Ensure calculations are correct
-        value = self.__system.cpu.a + self.__get_value(self.__system, ins) +\
+        value = self.__system.cpu.a + self.__get_value(ins) +\
             (1 if self.__system.cpu.flags.isset(emu.CPUFlags.CARRY) else 0)
         old = self.__system.cpu.a
         self.__system.cpu.a = value & 0xFF
@@ -326,23 +412,23 @@ class Program:
         self.__update_nz(self.__system.cpu.a)
     
     def __ins_CMP(self, ins:Instruction):
-        value = self.__system.cpu.a - self.__get_value(self.__system, ins)
+        value = self.__system.cpu.a - self.__get_value(ins)
         self.__system.cpu.flags = self.__system.cpu.flags.set(emu.CPUFlags.CARRY, value >= 0)
         self.__update_nz(value)
     
     def __ins_CPX(self, ins:Instruction):
-        value = self.__system.cpu.x - self.__get_value(self.__system, ins)
+        value = self.__system.cpu.x - self.__get_value(ins)
         self.__system.cpu.flags = self.__system.cpu.flags.set(emu.CPUFlags.CARRY, value >= 0)
         self.__update_nz(value)
     
     def __ins_CPY(self, ins:Instruction):
-        value = self.__system.cpu.y - self.__get_value(self.__system, ins)
+        value = self.__system.cpu.y - self.__get_value(ins)
         self.__system.cpu.flags = self.__system.cpu.flags.set(emu.CPUFlags.CARRY, value >= 0)
         self.__update_nz(value)
     
     def __ins_SBC(self, ins:Instruction):
         # TODO: Ensure calculations are correct
-        value = self.__system.cpu.a - self.__get_value(self.__system, ins) -\
+        value = self.__system.cpu.a - self.__get_value(ins) -\
             (0 if self.__system.cpu.flags.isset(emu.CPUFlags.CARRY) else 1)
         old = self.__system.cpu.a
         self.__system.cpu.a = (0x100 + value) & 0xFF
@@ -357,7 +443,7 @@ class Program:
     #region increment/decrement
 
     def __ins_DEC(self, ins:Instruction):
-        value = (self.__get_value(self.__system, ins) + 0xFF) & 0xFF
+        value = (self.__get_value(ins) + 0xFF) & 0xFF
         self.__set_value(ins, value)
         self.__update_nz(value)
 
@@ -370,7 +456,7 @@ class Program:
         self.__update_nz(self.__system.cpu.y)
     
     def __ins_INC(self, ins:Instruction):
-        value = (self.__get_value(self.__system, ins) + 1) & 0xFF
+        value = (self.__get_value(ins) + 1) & 0xFF
         self.__set_value(ins, value)
         self.__update_nz(value)
 
@@ -527,7 +613,7 @@ class command(cli.CLICommand):
 
     def __init__(self):
         super().__init__()
-        self.__time_alive = 0
+        self.__clear = False
 
     #endregion
 
@@ -535,19 +621,83 @@ class command(cli.CLICommand):
 
     __DELAY = 0.001
 
+    __ESC = 0x1B
+
+    __NOTRUNNING = (panes.StatusViewState.NOTRUNNING, panes.StatusViewState.PAUSED,) # Do NOT include ERROR
+
     #endregion
 
     #region receivers
 
     def __postdraw(self, args:boacon.BCPostDrawArgs):
-        # args.win.addstr(0, 1, f"{self.__time_alive:.2f} sec")
-        pass
+        if self.__clear:
+            args.win.clear()
+            self.__clear = False
 
     def __on_init(self):
         boacon.postdraw().connect(self.__postdraw)
 
     def __on_final(self):
         boacon.postdraw().disconnect(self.__postdraw)
+
+    #endregion
+
+    #region helper methods
+
+    def __show_help(self, ref_w:int, ref_h:int, f):
+        help = Help()
+        help.x.dis0 = (ref_w - help.ideal_width) // 2
+        help.x.len = help.ideal_width
+        help.y.dis0 = (ref_h - help.ideal_height) // 2
+        help.y.len = help.ideal_height
+        boacon.panes().append(help)
+        boacon.refresh()
+        # Wait for user to stop pressing buttons
+        while boacon.getch() != -1: time.sleep(self.__DELAY)
+        # Wait for user to press Esc or F1
+        while True:
+            _ch = boacon.getch()
+            if _ch == KEY_F1 or _ch == self.__ESC: break
+            time.sleep(self.__DELAY)
+        # Wait for user to stop pressing buttons
+        while boacon.getch() != -1: time.sleep(self.__DELAY)
+        # Close
+        boacon.panes().remove(help)
+        # Known bug, pane won't disappear
+
+    @classmethod
+    def __force_redraw(cls):
+        _panes = []
+        _x_dis0 = []
+        _x_dis1 = []
+        _x_len = []
+        _y_dis0 = []
+        _y_dis1 = []
+        _y_len = []
+        for _pane in boacon.panes():
+            _panes.append(_pane)
+            _x_dis0.append(_pane.x.dis0)
+            _x_dis1.append(_pane.x.dis1)
+            _x_len.append(_pane.x.len)
+            _y_dis0.append(_pane.y.dis0)
+            _y_dis1.append(_pane.y.dis1)
+            _y_len.append(_pane.y.len)
+            _pane.x.dis0 = 0
+            _pane.x.dis1 = -1
+            _pane.x.len = 0
+            _pane.y.dis0 = 0
+            _pane.y.dis1 = -1
+            _pane.y.len = 0
+        boacon.refresh()
+        for _i in range(len(_panes)):
+            _pane = _panes[_i]
+            _pane.x.dis0 = _x_dis0[_i]
+            _pane.x.dis1 = _x_dis1[_i]
+            _pane.x.len = _x_len[_i]
+            _pane.y.dis0 = _y_dis0[_i]
+            _pane.y.dis1 = _y_dis1[_i]
+            _pane.y.len = _y_len[_i]
+        boacon.refresh()
 
     #endregion
 
@@ -567,11 +717,45 @@ class command(cli.CLICommand):
             boacon.on_final().connect(self.__on_final)
             boacon.init()
             try:
+                #region Placement
+                PLACE_MAIN = 19
+                # Stack view
+                PLACE_STACK_X0 = 1
+                PLACE_STACK_X1 = PLACE_STACK_X0 + 9
+                PLACE_STACK_Y0 = 1
+                PLACE_STACK_Y1 = PLACE_MAIN
+                # Status view
+                PLACE_STATUS_X0 = PLACE_STACK_X1 + 1
+                PLACE_STATUS_X1 = PLACE_STATUS_X0 + 51
+                PLACE_STATUS_Y0 = 1
+                PLACE_STATUS_Y1 = PLACE_STATUS_Y0 + 3
+                # RAM view
+                PLACE_RAM_X0 = PLACE_STATUS_X0
+                PLACE_RAM_X1 = PLACE_STATUS_X1
+                PLACE_RAM_Y0 = PLACE_STATUS_Y1 + 1
+                PLACE_RAM_Y1 = PLACE_MAIN
+                # Memory view
+                PLACE_MEMORY_X0 = PLACE_RAM_X1 + 1
+                PLACE_MEMORY_X1 = PLACE_MEMORY_X0 + 53
+                PLACE_MEMORY_Y0 = 1
+                PLACE_MEMORY_Y1 = PLACE_MAIN
+                # History view
+                PLACE_HISTORY_X1 = PLACE_MEMORY_X1
+                PLACE_HISTORY_X0 = PLACE_HISTORY_X1 - 72
+                # General console
+                PLACE_GENCON_X0 = 1
+                PLACE_GENCON_X1 = PLACE_HISTORY_X0 - 1
+                #endregion
                 # Create program
                 program = Program(rom_data[:assutil.ROM_SIZE], nogarb, stackwrap)
+                def program_refresh():
+                    view_stack.refresh()
+                    view_status.refresh()
+                    view_ram.refresh()
+                    view_memory.refresh()
                 def program_step():
                     nonlocal program
-                    nonlocal gencon, view_history, view_stack, view_status
+                    nonlocal gencon, view_history, view_stack, view_status, view_ram, view_memory
                     if program.error is not None: return
                     # Get system info
                     _sys_pos = program.system.memory.pos
@@ -598,52 +782,103 @@ class command(cli.CLICommand):
                                 program.system.cpu.y,\
                                 program.system.cpu.flags)\
                             ))
-                        # Update stack view
-                        view_stack.refresh()
-                        # Update status view
-                        view_status.refresh()
+                        # Refresh panes
+                        program_refresh()
                     # No! An error occurred!
                     else:
                         gencon.print(program.error)
+                        view_status.state = panes.StatusViewState.ERROR
                 # General console
                 gencon = boacon.BCConsolePane()
-                gencon.x.dis0 = 1
-                gencon.x.len = 30
+                gencon.x.dis0 = PLACE_GENCON_X0
+                gencon.x.len = PLACE_GENCON_X1 - PLACE_GENCON_X0
+                gencon.y.dis0 = PLACE_MAIN + 1
                 gencon.y.dis1 = 1
-                gencon.y.len = 10
                 boacon.panes().append(gencon)
                 # History view
                 view_history = panes.InsHisView()
-                view_history.x.dis0 = 32
-                view_history.x.dis1 = 1
+                view_history.x.dis0 = PLACE_HISTORY_X0
+                view_history.x.len = PLACE_HISTORY_X1 - PLACE_HISTORY_X0
+                view_history.y.dis0 = PLACE_MAIN + 1
                 view_history.y.dis1 = 1
-                view_history.y.len = 10
                 boacon.panes().append(view_history)
                 # Stack view
                 view_stack = panes.StackView(program.system.cpu.stack)
-                view_stack.x.dis0 = 1
-                view_stack.x.len = 9
-                view_stack.y.dis0 = 1
-                view_stack.y.dis1 = 12
+                view_stack.x.dis0 = PLACE_STACK_X0
+                view_stack.x.len = PLACE_STACK_X1 - PLACE_STACK_X0
+                view_stack.y.dis0 = PLACE_STACK_Y0
+                view_stack.y.len = PLACE_STACK_Y1 - PLACE_STACK_Y0
+                view_stack.refresh()
                 boacon.panes().append(view_stack)
                 # Status view
                 view_status = panes.StatusView(program.system)
-                view_status.x.dis0 = 11
-                view_status.x.len = 9
-                view_status.y.dis0 = 1
-                view_status.y.dis1 = 12
+                view_status.x.dis0 = PLACE_STATUS_X0
+                view_status.x.len = PLACE_STATUS_X1 - PLACE_STATUS_X0
+                view_status.y.dis0 = PLACE_STATUS_Y0
+                view_status.y.len = PLACE_STATUS_Y1 - PLACE_STATUS_Y0
+                view_status.refresh()
                 boacon.panes().append(view_status)
+                # RAM view
+                view_ram = panes.RAMView(program.system.memory)
+                view_ram.x.dis0 = PLACE_RAM_X0
+                view_ram.x.len = PLACE_RAM_X1 - PLACE_RAM_X0
+                view_ram.y.dis0 = PLACE_RAM_Y0
+                view_ram.y.len = PLACE_RAM_Y1 - PLACE_RAM_Y0
+                view_ram.refresh()
+                boacon.panes().append(view_ram)
+                # Memory view
+                view_memory = panes.MemoryView(program.system.memory)
+                view_memory.x.dis0 = PLACE_MEMORY_X0
+                view_memory.x.len = PLACE_MEMORY_X1 - PLACE_MEMORY_X0
+                view_memory.y.dis0 = PLACE_MEMORY_Y0
+                view_memory.y.len = PLACE_MEMORY_Y1 - PLACE_MEMORY_Y0
+                view_memory.refresh()
+                boacon.panes().append(view_memory)
                 # Warn user if ROM requires bank switching
                 if len(rom_data) > assutil.ROM_SIZE: gencon.print(\
                     "ROMs with bank switching are not supported.")
                 # Run thru program
-                gencon.print("Press Space to Step")
-                gencon.print("Press Esc to Quit")
+                IDEAL_WIDTH = PLACE_HISTORY_X1 + 1
+                IDEAL_HEIGHT = 32
+                gencon.print(f"Program works best at {IDEAL_WIDTH}x{IDEAL_HEIGHT}")
+                gencon.print("Press F1 for help")
+                gencon.print("Press Esc to quit")
                 while True:
+                    # Run
+                    if view_status.state == panes.StatusViewState.RUNNING:
+                        program_step()
                     # Check input
-                    ch = boacon.getch()
-                    if ch == 0x1B: break
-                    if ch == 0x20: program_step()
+                    _ch = boacon.getch()
+                    # Quit?
+                    if _ch == self.__ESC:
+                        break
+                    # Help?
+                    elif _ch == KEY_F1:
+                        self.__show_help(IDEAL_WIDTH, IDEAL_HEIGHT, gencon)
+                        self.__force_redraw()
+                    # Reset?
+                    elif _ch == KEY_F5:
+                        program.reset()
+                        view_history.clear()
+                        view_status.state = panes.StatusViewState.NOTRUNNING
+                        program_refresh()
+                    # Play/pause?
+                    elif _ch == 0x0A:
+                        if view_status.state in self.__NOTRUNNING:
+                            view_status.state = panes.StatusViewState.RUNNING
+                        elif view_status.state == panes.StatusViewState.RUNNING:
+                            view_status.state = panes.StatusViewState.PAUSED
+                    # Step thru?
+                    elif _ch == 0x20:
+                        if view_status.state in self.__NOTRUNNING:
+                            program_step()
+                            view_status.state = panes.StatusViewState.PAUSED
+                    # Page Up?
+                    elif _ch == KEY_PPAGE:
+                        view_memory.page = (view_memory.page + panes.MemoryView.NUM_PAGES - 1) % panes.MemoryView.NUM_PAGES
+                    # Page Down?
+                    elif _ch == KEY_NPAGE:
+                        view_memory.page = (view_memory.page + 1) % panes.MemoryView.NUM_PAGES
                     # Refresh
                     boacon.refresh()
                     time.sleep(self.__DELAY)

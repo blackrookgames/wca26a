@@ -31,3 +31,12 @@ class System:
     def memory(self): return self.__memory
 
     #endregion
+
+    #region methods
+
+    def reset(self):
+        """ Resets the system """
+        self.__cpu.reset()
+        self.__memory.reset()
+
+    #endregion

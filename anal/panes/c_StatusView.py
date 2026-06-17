@@ -1,15 +1,24 @@
-__all__ = ['StatusView']
+__all__ = ['StatusView', 'StatusViewState']
 
 import boacon as _boacon
 
 from dataclasses import\
     dataclass as _dataclass
+from enum import\
+    auto as _auto,\
+    Enum as _Enum
 
-import assutil as _assutil
 import emu as _emu
+import help as _help
 
 from .c_SurfacePaneBase import\
     SurfacePaneBase as _SurfacePaneBase
+
+class StatusViewState(_Enum):
+    NOTRUNNING = _auto()
+    RUNNING = _auto()
+    PAUSED = _auto()
+    ERROR = _auto()
 
 class StatusView(_SurfacePaneBase):
     """ Represents a view of system status """
@@ -50,25 +59,43 @@ class StatusView(_SurfacePaneBase):
         Initializer for StatusView
 
         :param system: System
-        :raises ValueError: maxsize is less than zero
         """
         super().__init__()
         self.__system = system
-        self._surface.resize(10, 14)
+        self._surface.resize(35, 3)
         # Registers
-        self._surface.set(0, 5, self.__REG_N)
-        self._surface.set(0, 6, self.__REG_V)
-        self._surface.set(0, 7, self.__REG_E)
-        self._surface.set(0, 8, self.__REG_B)
-        self._surface.set(0, 9, self.__REG_D)
-        self._surface.set(0, 10, self.__REG_I)
-        self._surface.set(0, 11, self.__REG_Z)
-        self._surface.set(0, 12, self.__REG_C)
+        self._surface.set(22, 0, self.__REG_N)
+        self._surface.set(23, 0, self.__REG_V)
+        self._surface.set(24, 0, self.__REG_E)
+        self._surface.set(25, 0, self.__REG_B)
+        self._surface.set(26, 0, self.__REG_D)
+        self._surface.set(27, 0, self.__REG_I)
+        self._surface.set(28, 0, self.__REG_Z)
+        self._surface.set(29, 0, self.__REG_C)
         # Program counter
         self.__print(0, 0, "PC")
-        self.__print(0, 1, "A")
-        self.__print(0, 2, "X")
-        self.__print(0, 3, "Y")
+        self.__print(7, 0, "A")
+        self.__print(12, 0, "X")
+        self.__print(17, 0, "Y")
+        # State
+        self.__state:StatusViewState = StatusViewState.NOTRUNNING
+
+    #endregion
+
+    #region properties
+
+    @property
+    def state(self):
+        """
+        Program state\n
+        This has to be manually modified
+        """
+        return self.__state
+    @state.setter
+    def state(self, value:StatusViewState):
+        if self.__state == value: return
+        self.__state = value
+        self.refresh()
 
     #endregion
 
@@ -89,18 +116,20 @@ class StatusView(_SurfacePaneBase):
         A manual refresh is neccessary as the register view can't detect when the system changes state.
         """
         # Registers
-        self._surface.set(4, 5, self.__REG_1 if self.__system.cpu.flags.isset(_emu.CPUFlags.NEGATIVE) else self.__REG_0)
-        self._surface.set(4, 6, self.__REG_1 if self.__system.cpu.flags.isset(_emu.CPUFlags.OVERFLOW) else self.__REG_0)
-        self._surface.set(4, 7, self.__REG_1 if self.__system.cpu.flags.isset(_emu.CPUFlags.EXPANSION) else self.__REG_0)
-        self._surface.set(4, 8, self.__REG_1 if self.__system.cpu.flags.isset(_emu.CPUFlags.BREAK) else self.__REG_0)
-        self._surface.set(4, 9, self.__REG_1 if self.__system.cpu.flags.isset(_emu.CPUFlags.DECIMAL) else self.__REG_0)
-        self._surface.set(4, 10, self.__REG_1 if self.__system.cpu.flags.isset(_emu.CPUFlags.INTDIS) else self.__REG_0)
-        self._surface.set(4, 11, self.__REG_1 if self.__system.cpu.flags.isset(_emu.CPUFlags.ZERO) else self.__REG_0)
-        self._surface.set(4, 12, self.__REG_1 if self.__system.cpu.flags.isset(_emu.CPUFlags.CARRY) else self.__REG_0)
+        self._surface.set(22, 1, self.__REG_1 if self.__system.cpu.flags.isset(_emu.CPUFlags.NEGATIVE) else self.__REG_0)
+        self._surface.set(23, 1, self.__REG_1 if self.__system.cpu.flags.isset(_emu.CPUFlags.OVERFLOW) else self.__REG_0)
+        self._surface.set(24, 1, self.__REG_1 if self.__system.cpu.flags.isset(_emu.CPUFlags.EXPANSION) else self.__REG_0)
+        self._surface.set(25, 1, self.__REG_1 if self.__system.cpu.flags.isset(_emu.CPUFlags.BREAK) else self.__REG_0)
+        self._surface.set(26, 1, self.__REG_1 if self.__system.cpu.flags.isset(_emu.CPUFlags.DECIMAL) else self.__REG_0)
+        self._surface.set(27, 1, self.__REG_1 if self.__system.cpu.flags.isset(_emu.CPUFlags.INTDIS) else self.__REG_0)
+        self._surface.set(28, 1, self.__REG_1 if self.__system.cpu.flags.isset(_emu.CPUFlags.ZERO) else self.__REG_0)
+        self._surface.set(29, 1, self.__REG_1 if self.__system.cpu.flags.isset(_emu.CPUFlags.CARRY) else self.__REG_0)
         # Program counter
-        self.__print(4, 0, f"${self.__system.memory.pos:04X}")
-        self.__print(4, 1, f"${self.__system.cpu.a:02X}")
-        self.__print(4, 2, f"${self.__system.cpu.x:02X}")
-        self.__print(4, 3, f"${self.__system.cpu.y:02X}")
+        self.__print(0, 1, f"${self.__system.memory.pos:04X}")
+        self.__print(7, 1, f"${self.__system.cpu.a:02X}")
+        self.__print(12, 1, f"${self.__system.cpu.x:02X}")
+        self.__print(17, 1, f"${self.__system.cpu.y:02X}")
+        # Status
+        self.__print(0, 2, _help.StrUtil.ljusttrun(self.__state.name, self._surface.width))
 
     #endregion

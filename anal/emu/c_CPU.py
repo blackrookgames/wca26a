@@ -19,11 +19,20 @@ class CPU:
         :param nogarb: If true, initial garbage data will not be emulated
         :param allowwrap: If true, stack pointer will wrap upon overflow/underflow; otherwise an EmuError is raised
         """
-        self.__a = 0 if nogarb else _random.randint(0x00, 0xFF) 
-        self.__x = 0 if nogarb else _random.randint(0x00, 0xFF) 
-        self.__y = 0 if nogarb else _random.randint(0x00, 0xFF) 
+        self.__nogarb = nogarb
         self.__stack = _CPUStack(nogarb, allowwrap)
-        self.__flags = _CPUFlags.NONE
+        self.__reset_regs()
+    
+    #endregion
+
+    #region fields
+
+    __nogarb:bool
+    __stack:_CPUStack
+    __a:int
+    __x:int
+    __y:int
+    __flags:_CPUFlags
     
     #endregion
 
@@ -65,5 +74,24 @@ class CPU:
     @flags.setter
     def flags(self, value:'_CPUFlags'):
         self.__flags = value
+
+    #endregion
+
+    #region helper methods
+
+    def __reset_regs(self):
+        self.__a = 0 if self.__nogarb else _random.randint(0x00, 0xFF) 
+        self.__x = 0 if self.__nogarb else _random.randint(0x00, 0xFF) 
+        self.__y = 0 if self.__nogarb else _random.randint(0x00, 0xFF)
+        self.__flags = _CPUFlags.NONE if self.__nogarb else _CPUFlags(_random.randint(0x00, 0xFF))
+
+    #endregion
+
+    #region methods
+
+    def reset(self):
+        """ Resets the CPU """
+        self.__stack.reset()
+        self.__reset_regs()
 
     #endregion

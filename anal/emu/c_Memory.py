@@ -24,11 +24,18 @@ class Memory:
         :param nogarb: If true, initial garbage data will not be emulated
         """
         self.__content = _ByteArray(self.SIZE, nogarb)
-        self.__ptr_mni:int = _assutil.ROM_BEG
-        self.__ptr_entry:int = _assutil.ROM_BEG
-        self.__ptr_break:int = _assutil.ROM_BEG
-        # Update pointers (to ensure they match randomized content)
+        self.__pos = 0
         self.__update()
+
+    #endregion
+
+    #region fields
+
+    __content:_ByteArray
+    __pos:int
+    __ptr_mni:int
+    __ptr_entry:int
+    __ptr_break:int
 
     #endregion
 
@@ -110,13 +117,17 @@ class Memory:
     
     def __update(self):
         # Update pointers
-        self.__ptr_mni:int = _struct.unpack('<H', self.__read(_assutil.ADDR_NMI, 2))[0]
-        self.__ptr_entry:int = _struct.unpack('<H', self.__read(_assutil.ADDR_ENTRY, 2))[0]
-        self.__ptr_break:int = _struct.unpack('<H', self.__read(_assutil.ADDR_BREAK, 2))[0]
+        self.__ptr_mni = _struct.unpack('<H', self.__read(_assutil.ADDR_NMI, 2))[0]
+        self.__ptr_entry = _struct.unpack('<H', self.__read(_assutil.ADDR_ENTRY, 2))[0]
+        self.__ptr_break = _struct.unpack('<H', self.__read(_assutil.ADDR_BREAK, 2))[0]
     
     #endregion
 
     #region methods
+
+    def reset(self):
+        """ Resets the memory """
+        self.__content.reset()
 
     def goto(self, address:int):
         self.__raise_if_oor(address)

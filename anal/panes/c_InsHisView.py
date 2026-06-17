@@ -158,11 +158,17 @@ class InsHisView(_BufferedPane):
     #region methods
 
     def log(self, entry:InsHisViewEntry):
+        """ Logs a new history entry """
         # Add entry
         self.__entries.append(entry)
         # Clip excess entries
         self._clip_excess()
         # Redraw
+        self._redraw()
+
+    def clear(self):
+        """ Clears history """
+        self.__entries.clear()
         self._redraw()
 
     def set_maxsize(self, maxsize:int):

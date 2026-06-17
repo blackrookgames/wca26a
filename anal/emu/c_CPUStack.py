@@ -1,5 +1,7 @@
 __all__ = ['CPUStack']
 
+import random as _random
+
 from .c_ByteArray import\
     ByteArray as _ByteArray
 from .c_EmuError import\
@@ -17,9 +19,10 @@ class CPUStack:
         :param nogarb: If true, initial garbage data will not be emulated
         :param allowwrap: If true, stack pointer will wrap upon overflow/underflow; otherwise an EmuError is raised
         """
-        self.__bytes = _ByteArray(self.SIZE, nogarb)
-        self.__pos = len(self.__bytes)
+        self.__nogarb = nogarb
         self.__allowwrap = allowwrap
+        self.__bytes = _ByteArray(self.SIZE, nogarb)
+        self.__reset_pos()
 
     #endregion
 
@@ -54,6 +57,15 @@ class CPUStack:
     
     #endregion
 
+    #region fields
+
+    __nogarb:bool
+    __allowwrap:bool
+    __bytes:_ByteArray
+    __pos:int
+    
+    #endregion
+
     #region properties
 
     @property
@@ -84,9 +96,17 @@ class CPUStack:
         if index >= 0 and index < len(self.__bytes): return
         raise IndexError("Index is out of range.")
     
+    def __reset_pos(self):
+        self.__pos = len(self.__bytes) if self.__nogarb else _random.randint(0, len(self.__bytes))
+    
     #endregion
 
     #region methods
+
+    def reset(self):
+        """ Resets the stack """
+        self.__bytes.reset()
+        self.__reset_pos()
 
     def push(self, value:int):
         """
