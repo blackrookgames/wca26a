@@ -473,11 +473,6 @@ class cmd_dis(cli.CLICommand):
                 # No!
                 return str(dest)
             with cliutil.FileUtil.open_w(output) as _f:
-                # Write entry and break
-                _f.write(f"?NMI {get_addr_label(addr_nmi)}\n")
-                _f.write(f"?ENTRY {get_addr_label(addr_entry)}\n")
-                _f.write(f"?BREAK {get_addr_label(addr_break)}\n")
-                _f.write('\n')
                 # Write macros
                 _macros_cmn = {_k: _v for _k, _v in addrs_unlabelled.items() if _k in cmnaddrs}
                 if len(_macros_cmn) > 0:
@@ -493,6 +488,11 @@ class cmd_dis(cli.CLICommand):
                     for _addr, _naindex in sorted(_macros_not.items(), key = lambda _item: _item[0]):
                         _f.write(f"@DEFINE    {nameaddrs[_naindex].name!s:<11}{_addr!s:>5}\n")
                     _f.write('\n')
+                # Write entry and break
+                _f.write(f"?NMI {get_addr_label(addr_nmi)}\n")
+                _f.write(f"?ENTRY {get_addr_label(addr_entry)}\n")
+                _f.write(f"?BREAK {get_addr_label(addr_break)}\n")
+                _f.write('\n')
                 # Write data
                 for _addr, _data in sorted(rom_data.items(), key = lambda item: item[0]):
                     # Write label (if one exists here)
