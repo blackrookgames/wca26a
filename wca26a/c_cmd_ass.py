@@ -3098,9 +3098,92 @@ class _Assembler:
                 except help.BadOpError as _e: raise err(_lci.src, _e)
         # Write to symbols
         if self.__symbol is not None:
+            # Group by parents
+            _rawparents:dict[str, list[tuple[str, int]]] = {}
+            for _path, _addr in self.__p1__labels.items():
+                if '.' in _path:
+                    _period = _path.index('.')
+                    _pname = _path[:_period]
+                    _cname = _path[_period:]
+                else:
+                    _pname = _path
+                    _cname = ""
+                if _pname in _rawparents:
+                    _labels = _rawparents[_pname]
+                else:
+                    _labels:list[tuple[str, int]] = []
+                    _rawparents[_pname] = _labels
+                _labels.append((_cname, _addr))
+            # Remove casing (just to be safe)
+            _ncparents:list[tuple[str, list[tuple[str, int]]]] = []
+            for _rawpname, _rawlabels in _rawparents.items():
+                _ncpname = _rawpname.upper()
+                _nclabels:list[tuple[str, int]] = []
+                for _rawcname, _addr in _rawlabels:
+                    _nccname = _rawcname.lower()
+                    _nclabels.append((_nccname, _addr))
+                _ncparents.append((_ncpname, _nclabels))
+            # Generate unique parent names
+            _parents:dict[str, list[tuple[str, int]]] = {}
+            _i = 0
+            while _i < len(_ncparents):
+                _ncpname, _nclabels = _ncparents[_i]
+                if _ncpname not in _parents:
+                    _parents[_ncpname] = _nclabels
+                    _ncparents.pop(_i)
+                else:
+                    _i += 1
+            for _ncpname, _nclabels in _ncparents:
+                _i = 0
+                while True:
+                    _pname = f"{_ncpname}{_i}"
+                    if _pname not in _parents:
+                        _parents[_pname] = _nclabels
+                        break
+                    _i += 1
+            _ncparents.clear()
+            # Ungroup
+            _uglabels:list[tuple[str, str, int]] = []
+            for _pname, _labels in _parents.items():
+                for _cname, _addr in _labels:
+                    _uglabels.append((_pname, _cname, _addr))
+            # Generate unique child names
+            _finallabels:list[tuple[str, int]] = []
+            _labels_by_cname:dict[str, tuple[str, int]] = {}
+            _i = 0
+            while _i < len(_uglabels):
+                _ugpname, _ugcname, _ugaddr = _uglabels[_i]
+                if len(_ugcname) > 0:
+                    if _ugcname not in _labels_by_cname:
+                        _labels_by_cname[_ugcname] = (_ugpname, _ugaddr)
+                        _is_final = True
+                    else:
+                        _i += 1
+                        _is_final = False
+                else:
+                    _is_final = True
+                if _is_final:
+                    _finallabels.append((f"{_ugpname}{_ugcname}", _ugaddr))
+                    _uglabels.pop(_i)
+            for _ugpname, _ugcname, _ugaddr in _uglabels:
+                _i = 0
+                while True:
+                    _cname = f"{_ugcname}..{_i}"
+                    if _cname not in _labels_by_cname:
+                        _labels_by_cname[_cname] = (_ugpname, _ugaddr)
+                        _finallabels.append((f"{_ugpname}{_cname}", _ugaddr))
+                        break
+                    _i += 1
+            _uglabels.clear()
+            # Determine longest path
+            _longest = 0
+            for _path, _addr in _finallabels:
+                if _longest >= len(_path): continue
+                _longest = len(_path)
+            # Create symbols file
             with cliutil.FileUtil.open_w(self.__symbol) as _f:
-                for _path, _addr in self.__p1__labels.items():
-                    _f.write(f"{_path} {_addr:04X}\n")
+                for _path, _addr in sorted(_finallabels, key = lambda _sym: _sym[1]):
+                    _f.write(f"{_path.ljust(_longest)}    {_addr:04X}\n")
     
     #endregion
 
