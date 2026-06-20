@@ -2960,6 +2960,7 @@ class _Assembler:
         output = cast(None|Path, self.__cmd.output) # type: ignore
         self.__source = cast(Path, self.__cmd.source) # type: ignore
         self.__output = output if (output is not None) else self.__source.with_suffix('.a26')
+        self.__symbol = cast(None|Path, self.__cmd.symbol) # type: ignore
         self.__intmd = cast(None|Path, self.__cmd.intmd) # type: ignore
         self.__case = not cast(bool, self.__cmd.nocase) # type: ignore
         # Phase 0
@@ -3095,6 +3096,11 @@ class _Assembler:
             elif isinstance(_lci, _LCIInstruct):
                 try: self.__p1_preass.write(_lci)
                 except help.BadOpError as _e: raise err(_lci.src, _e)
+        # Write to symbols
+        if self.__symbol is not None:
+            with cliutil.FileUtil.open_w(self.__symbol) as _f:
+                for _path, _addr in self.__p1__labels.items():
+                    _f.write(f"{_path} {_addr:04X}\n")
     
     #endregion
 
@@ -3150,9 +3156,16 @@ class cmd_ass(cli.CLICommand):
         desc = "Output file (*.a26;*.bin)",\
         parse = cliutil.ParseUtil.to_path)
     
+    __symbol = cli.CLIOptionWArgDef(\
+        name = "symbol",\
+        short = 's',\
+        desc = "If defined, this will create a DASM-compatible symbol file (*.sym)",\
+        parse = cliutil.ParseUtil.to_path)
+    
     __intmd = cli.CLIOptionWArgDef(\
         name = "intmd",\
-        desc = "Path of an intermediate file (*.asm); this is basically an expanded version of the source file",\
+        desc = "If defined, this will create an intermediate file (*.asm); " +\
+            "this is basically an expanded version of the source file",\
         parse = cliutil.ParseUtil.to_path)
     
     __flags = cli.CLIOptionWArgDef(\
